@@ -24,6 +24,9 @@ on:
 env:
   ARCH: arm64
   SUBARCH: arm64
+  # GitHub runner 是 x86_64,必须交叉编译到 aarch64。
+  # 内核 Makefile 会据此推导 clang 的 --target 与 --prefix(见 Makefile:564-570)
+  CROSS_COMPILE: aarch64-linux-gnu-
   SUBLEVEL_OVERRIDE: '233'          # 对齐设备内核版本 5.4.233
   UPSTREAM: https://github.com/EcrosoftXiao/kernel_xiaomi_mars.git
   UPSTREAM_BRANCH: twelve
@@ -52,7 +55,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             git curl ccache bison flex libssl-dev libelf-dev bc python3 \
             python-is-python3 gperf device-tree-compiler libncurses-dev \
-            rsync unzip ca-certificates lz4 xz-utils clang lld llvm cpio zip
+            rsync unzip ca-certificates lz4 xz-utils clang lld llvm cpio zip \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          # 内核 Makefile 用 $(CROSS_COMPILE)elfedit 定位 GCC 工具链目录
+          which aarch64-linux-gnu-elfedit || echo "WARN: 缺少 aarch64 binutils"
 
       - name: Setup ccache
         run: |
