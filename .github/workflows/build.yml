@@ -525,7 +525,15 @@ jobs:
             "$IMG" "../artifacts/boot-${{ matrix.variant }}.img"
           ( cd ../artifacts && md5sum *.img > BOOT-IMGS.md5 )
           # 把编出来的模块打包 —— 后面要把它们塞进 vendor_boot 的 ramdisk 让 init 加载
-          find out -name '*.ko' -print0 2>/dev/null | tar --null -czf ../artifacts/modules.tgz -T - 2>/dev/null || true
+          # 先 strip 再打包:未 strip 的 .ko 带着调试信息,单个可能几 MB,tgz 会到 170MB
+          mkdir -p /tmp/kostrip
+          for f in $(find out -name '*.ko'); do
+            cp "$f" /tmp/kostrip/$(basename "$f")
+            ${CROSS_COMPILE}strip --strip-debug /tmp/kostrip/$(basename "$f") 2>/dev/null || true
+          done
+          ( cd /tmp/kostrip && tar -czf "$GITHUB_WORKSPACE/artifacts/modules.tgz" *.ko )
+          echo "strip 前后: $(du -sk /tmp/kostrip | cut -f1) KB"
+          ls -la "$GITHUB_WORKSPACE/artifacts/modules.tgz"
           echo "modules.tgz: $(stat -c%s ../artifacts/modules.tgz 2>/dev/null || echo 0) 字节, 共 $(find out -name '*.ko' | wc -l) 个 .ko"
           ls -la ../artifacts/
 
