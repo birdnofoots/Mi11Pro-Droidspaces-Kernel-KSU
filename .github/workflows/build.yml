@@ -119,37 +119,37 @@ jobs:
       - name: 安装原厂同款 clang 11.0.2 (r383902b1)
         if: github.event.inputs.toolchain != 'system-clang'
         run: |
-          set -euo pipefail
+          set -uo pipefail
           DEST="$HOME/aosp-clang"
-          mkdir -p "$DEST"
+          rm -rf "$DEST"; mkdir -p "$DEST"
           ok=0
-          # 1) Google 官方 prebuilt(android12-release 分支里就是 r383902b1)
-          for d in clang-r383902b1 clang-r383902b; do
-            U="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/${d}.tar.gz"
-            echo "尝试 $U"
-            if curl -fsSL --retry 2 --connect-timeout 20 -o /tmp/clang.tgz "$U"; then
-              rm -rf "$DEST"/*; tar -xzf /tmp/clang.tgz -C "$DEST" && ok=1 && break
+          # 1) GitHub 镜像优先(manifest_6877366 = 原厂 CC_VERSION_TEXT 里的 build 号)
+          for r in credits-infra/clang-r383902b1 ruoqing501/clang-r383902b1 qssn70/clang-r383902b1; do
+            U="https://codeload.github.com/${r}/tar.gz/refs/heads/main"
+            echo "=== 尝试镜像 $U"
+            if curl -fsSL --retry 3 --connect-timeout 20 -o /tmp/clang.tgz "$U"; then
+              rm -rf /tmp/clangx && mkdir -p /tmp/clangx && tar -xzf /tmp/clang.tgz -C /tmp/clangx
+              SRC=$(find /tmp/clangx -maxdepth 1 -mindepth 1 -type d | head -1)
+              if [ -x "$SRC/bin/clang" ]; then cp -a "$SRC"/. "$DEST"/; ok=1; break; fi
             fi
           done
-          # 2) GitHub 镜像(manifest_6877366 = 原厂 6877366)
+          # 2) Google 官方 prebuilt
           if [ "$ok" != 1 ]; then
-            for r in credits-infra/clang-r383902b1 ruoqing501/clang-r383902b1 qssn70/clang-r383902b1; do
-              U="https://codeload.github.com/${r}/tar.gz/refs/heads/main"
-              echo "尝试镜像 $U"
+            for d in clang-r383902b1 clang-r383902b; do
+              U="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/${d}.tar.gz"
+              echo "=== 尝试 $U"
               if curl -fsSL --retry 2 --connect-timeout 20 -o /tmp/clang.tgz "$U"; then
-                rm -rf /tmp/clangx && mkdir -p /tmp/clangx && tar -xzf /tmp/clang.tgz -C /tmp/clangx
-                SRC=$(find /tmp/clangx -maxdepth 1 -mindepth 1 -type d | head -1)
-                if [ -x "$SRC/bin/clang" ]; then rm -rf "$DEST"/*; cp -a "$SRC"/. "$DEST"/; ok=1; break; fi
+                rm -rf "$DEST"/*; tar -xzf /tmp/clang.tgz -C "$DEST" && ok=1 && break
               fi
             done
           fi
           # 3) apt 兜底
           if [ "$ok" != 1 ]; then
-            echo "::warning::AOSP prebuilt 下载失败,退回 apt clang-11"
+            echo "::warning::AOSP prebuilt 全部失败,退回 apt clang-11"
             sudo apt-get install -y --no-install-recommends clang-11 lld-11 || true
             if command -v clang-11 >/dev/null; then
               mkdir -p "$DEST/bin"
-              for t in clang clang++ ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip llvm-ranlib llvm-readelf; do
+              for t in clang clang++ ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip; do
                 base=${t%-11}; [ -e "/usr/bin/${t}-11" ] && ln -sf "/usr/bin/${t}-11" "$DEST/bin/$base"
               done
               [ -e /usr/bin/ld.lld-11 ] && ln -sf /usr/bin/ld.lld-11 "$DEST/bin/ld.lld"
@@ -157,12 +157,12 @@ jobs:
             fi
           fi
           [ "$ok" = 1 ] || { echo "::error::找不到 clang 11"; exit 1; }
-          # clang 11 prebuilt 需要 libtinfo.so.5
           if [ ! -e /usr/lib/x86_64-linux-gnu/libtinfo.so.5 ]; then
             sudo ln -sf /lib/x86_64-linux-gnu/libtinfo.so.6 /usr/lib/x86_64-linux-gnu/libtinfo.so.5 || true
           fi
           echo "$DEST/bin" >> $GITHUB_PATH
           "$DEST/bin/clang" --version || true
+          cat "$DEST/AndroidVersion.txt" 2>/dev/null || true
 
       - name: 选择工具链
         run: |
@@ -354,11 +354,23 @@ jobs:
       # ── 编译 ──────────────────────────────────────────────────
       - name: 编译
         run: |
-          set -o pipefail
           cd kernel
+          set +e
           /usr/bin/time -v make O=out -j"$(nproc)" CC="$CC" LD="$LD" \
-            SUBLEVEL=${SUBLEVEL_OVERRIDE} 2>&1 | tee /tmp/build.log | tail -5
-          ls -la out/arch/arm64/boot/Image || { echo "BUILD FAILED"; tail -80 /tmp/build.log; exit 1; }
+            SUBLEVEL=${SUBLEVEL_OVERRIDE} > /tmp/build.log 2>&1
+          rc=$?
+          mkdir -p ../artifacts
+          cp /tmp/build.log ../artifacts/build.log 2>/dev/null || true
+          echo "make 退出码: $rc"
+          tail -25 /tmp/build.log
+          if [ "$rc" -ne 0 ] || [ ! -f out/arch/arm64/boot/Image ]; then
+            echo "=================== BUILD FAILED ==================="
+            echo "--- 错误行 ---"
+            grep -nE "error:|Error [0-9]+|No rule to make|not found|undefined reference" /tmp/build.log | head -40
+            echo "--- 最后 150 行 ---"
+            tail -150 /tmp/build.log
+            exit 1
+          fi
 
       # ── 校验 ──────────────────────────────────────────────────
       - name: 校验产物
@@ -452,6 +464,7 @@ jobs:
           ls -la ../artifacts/
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: mars-${{ matrix.variant }}-${{ env.KERNEL_SHA }}
           path: artifacts/*
