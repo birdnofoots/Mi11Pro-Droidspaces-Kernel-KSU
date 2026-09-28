@@ -310,6 +310,42 @@ jobs:
           grep -q 'CONFIG_KSU' drivers/Makefile || printf '\nobj-$(CONFIG_KSU)\t\t+= kernelsu/\n' >> drivers/Makefile
           grep -q 'drivers/kernelsu' drivers/Kconfig || printf '\nsource "drivers/kernelsu/Kconfig"\n' >> drivers/Kconfig
 
+      # ── 对齐原厂:关掉这棵 backport 树独有的底层特性 ──────────────
+      # 小米 5.4.233 原厂配置里【完全没有】RELR / STACKPROTECTOR_PER_TASK /
+      # REFCOUNT_FULL,而这棵社区 backport 树把它们强制打开。三者都改内核最底层
+      # 行为(自举重定位格式 / 栈金丝雀 / refcount_t 类型),其中 RELR 在 head.S
+      # 就生效 —— 一旦出错的表现正好是「零日志 + bootloader 等几秒后重启」。
+      # 前两个实测用 defconfig 关不掉(def_bool y / select),必须改 Kconfig。
+      - name: 对齐原厂(关掉 RELR / PER_TASK / REFCOUNT_FULL)
+        run: |
+          cd kernel
+          python3 - <<'PY'
+          import re
+          p = 'arch/Kconfig'
+          s = open(p).read()
+          s2 = re.sub(r'(config RELR\n\tbool "Use RELR relocation packing"\n)(\tdepends[^\n]*\n)(\tdefault )y',
+                      r'\1\2\3n', s)
+          if s2 != s:
+              open(p, 'w').write(s2); print('RELR default y -> n')
+          else:
+              print('WARN: RELR 定义未匹配(可能本来就不是 default y)')
+
+          p = 'arch/arm64/Kconfig'
+          s = open(p).read()
+          s2 = re.sub(r'(config STACKPROTECTOR_PER_TASK\n\tdef_bool )y', r'\1n', s)
+          if s2 != s:
+              open(p, 'w').write(s2); print('STACKPROTECTOR_PER_TASK def_bool y -> n')
+          else:
+              print('WARN: STACKPROTECTOR_PER_TASK 未匹配')
+
+          s = open(p).read()
+          s2 = re.sub(r'^\tselect REFCOUNT_FULL\n', '', s, flags=re.M)
+          if s2 != s:
+              open(p, 'w').write(s2); print('已移除 arch/arm64 的 select REFCOUNT_FULL')
+          else:
+              print('WARN: select REFCOUNT_FULL 未找到')
+          PY
+
       # ── 清理树里的悬空 kernelsu 引用 ─────────────────────────
       # 第三方树普遍把 KernelSU 做成 patch:drivers/Kconfig 里留了 source 行、
       # drivers/Makefile 里留了 obj-y += kernelsu/,但目录并不在仓库里。
