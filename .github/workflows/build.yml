@@ -305,6 +305,22 @@ jobs:
           grep -q 'CONFIG_KSU' drivers/Makefile || printf '\nobj-$(CONFIG_KSU)\t\t+= kernelsu/\n' >> drivers/Makefile
           grep -q 'drivers/kernelsu' drivers/Kconfig || printf '\nsource "drivers/kernelsu/Kconfig"\n' >> drivers/Kconfig
 
+      # ── 清理树里的悬空引用(很多第三方树把 KernelSU 做成 patch) ──
+      - name: 清理悬空 Kconfig 引用
+        run: |
+          cd kernel || exit 0
+          if grep -q 'drivers/kernelsu/Kconfig' drivers/Kconfig 2>/dev/null && [ ! -e drivers/kernelsu/Kconfig ]; then
+            if [ "${{ matrix.ksu }}" = "1" ]; then
+              echo "KSU 变体会在下一步生成 drivers/kernelsu/Kconfig,先放个占位"
+              mkdir -p drivers/kernelsu
+              printf 'config KSU\n\tbool "KernelSU"\n\tdefault n\n' > drivers/kernelsu/Kconfig
+            else
+              sed -i '\#source "drivers/kernelsu/Kconfig"#d' drivers/Kconfig
+              echo "已移除悬空的 kernelsu source 行"
+            fi
+          fi
+          grep -c 'drivers/kernelsu/Kconfig' drivers/Kconfig || true
+
       # ── 配置 ──────────────────────────────────────────────────
       - name: 生成 .config
         run: |
