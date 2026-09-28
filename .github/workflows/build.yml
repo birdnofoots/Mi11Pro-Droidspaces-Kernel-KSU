@@ -436,7 +436,6 @@ jobs:
           cd kernel
           IMG=out/arch/arm64/boot/Image
           mkdir -p ../artifacts
-          cp "$IMG" ../artifacts/Image
           cp out/.config ../artifacts/config.gz.txt 2>/dev/null || cp out/.config ../artifacts/
           {
             echo "variant      : ${{ matrix.variant }}"
@@ -460,7 +459,6 @@ jobs:
           if [ "${{ matrix.ksu }}" = "1" ]; then
             echo "=== KernelSU ==="; strings $IMG | grep -c 'KernelSU' || true
           fi
-          find out -name '*.ko' -exec cp {} ../artifacts/ \; 2>/dev/null || true
           ls -la ../artifacts
 
       - name: kABI CRC 对照(决定原厂模块能否加载)
@@ -523,7 +521,6 @@ jobs:
           IMG=out/arch/arm64/boot/Image
           python3 ../tools/make-bootimg.py ../ref/boot-header.bin ../ref/boot-ramdisk.gz \
             "$IMG" "../artifacts/boot-${{ matrix.variant }}.img"
-          python3 ../tools/make-bootimg.py ../ref/boot-header.bin ../ref/boot-ramdisk.gz \
             "$IMG" "../artifacts/boot-${{ matrix.variant }}-nomods.img" --no-ramdisk-mods
           ( cd ../artifacts && md5sum *.img > BOOT-IMGS.md5 )
           ls -la ../artifacts/
