@@ -386,7 +386,8 @@ jobs:
           for c in SYSVIPC POSIX_MQUEUE IPC_NS PID_NS USER_NS DEVTMPFS TMPFS_POSIX_ACL \
                    TMPFS_XATTR CGROUP_DEVICE CGROUP_PIDS NETFILTER_XT_MATCH_ADDRTYPE \
                    MODVERSIONS MODULE_SIG LTO_NONE LTO_CLANG LTO_CLANG_THIN CLANG_VERSION \
-                   LOCALVERSION PSTORE_RAM KSU ARM64_ERRATUM_1742098 ; do
+                   LOCALVERSION PSTORE_RAM KSU ARM64_ERRATUM_1742098 \
+                   RELR TOOLS_SUPPORT_RELR STACKPROTECTOR_PER_TASK REFCOUNT_FULL ; do
             printf '  %-32s %s\n' "$c" "$(grep -m1 "^CONFIG_${c}=" out/.config || grep -m1 "^# CONFIG_${c} is not set" out/.config || echo '(不在本树)')"
           done
           echo "=== 与原厂配置差异 ==="
