@@ -398,18 +398,58 @@ jobs:
           cd kernel
           SYM=out/Module.symvers
           cp "$SYM" ../artifacts/Module.symvers 2>/dev/null || true
-          # 原厂内核的权威值:从原厂 .ko 的 __versions 段读出来的
-          declare -A STOCK=( [module_layout]=0x1e5b7ab7 [platform_driver_unregister]=0x4cbcbb6a )
-          echo "| 符号 | 原厂 | 本次构建 | 匹配 |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|---|---|" >> $GITHUB_STEP_SUMMARY
-          for sym in "${!STOCK[@]}"; do
-            got=$(grep -m1 -P "\t$sym\t" "$SYM" | cut -f1)
-            [ -z "$got" ] && got="(未导出)"
-            if [ "$got" = "${STOCK[$sym]}" ]; then ok="✅"; else ok="❌"; fi
-            printf '  %-30s stock=%-12s ours=%-12s %s\n' "$sym" "${STOCK[$sym]}" "$got" "$ok"
-            echo "| $sym | ${STOCK[$sym]} | $got | $ok |" >> $GITHUB_STEP_SUMMARY
-          done
-          echo "=== Module.symvers 行数: $(wc -l < $SYM) ==="
+          python3 - ../ref/stock-crcs.txt "$SYM" <<'PY' | tee ../artifacts/CRC-REPORT.txt
+          import sys
+          stock = {}
+          for line in open(sys.argv[1]):
+              n, c = line.rstrip("\n").split("\t")
+              stock[n] = int(c, 16)
+          ours = {}
+          for line in open(sys.argv[2], errors="ignore"):
+              f = line.split("\t")
+              if len(f) >= 2:
+                  try:
+                      ours[f[1]] = int(f[0], 16)
+                  except ValueError:
+                      pass
+          common = [k for k in stock if k in ours]
+          match = [k for k in common if stock[k] == ours[k]]
+          pct = 100.0 * len(match) / max(1, len(common))
+          print("原厂(vendor 114 个 .ko)导出符号 : %d" % len(stock))
+          print("本次导出                        : %d" % len(ours))
+          print("可比                            : %d" % len(common))
+          print("CRC 完全相同                    : %d = %.2f%%   <- 越高越好,>99%% 说明模块能直接加载"
+                % (len(match), pct))
+          print()
+          print("关键符号:")
+          for k in ("module_layout", "platform_driver_unregister", "register_filesystem",
+                    "__stack_chk_guard", "printk", "kmalloc_caches"):
+              if k in stock:
+                  o = ours.get(k)
+                  print("  %-32s 原厂=0x%08x 本次=%s %s"
+                        % (k, stock[k], ("0x%08x" % o) if o else "(未导出)",
+                           "OK" if o == stock[k] else "MISMATCH"))
+          bad = sorted(k for k in common if stock[k] != ours[k])
+          print()
+          print("不匹配的前 50 个:")
+          print("  " + ", ".join(bad[:50]))
+          with open("../artifacts/CRC-SUMMARY.txt", "w") as fh:
+              fh.write("%.2f%% (%d/%d)\n" % (pct, len(match), len(common)))
+          PY
+          echo "| 变体 | CRC 匹配率 |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| ${{ matrix.variant }} | $(cat ../artifacts/CRC-SUMMARY.txt) |" >> $GITHUB_STEP_SUMMARY
+
+      - name: 打包 boot.img(可直接 fastboot)
+        run: |
+          cd kernel
+          IMG=out/arch/arm64/boot/Image
+          python3 ../tools/make-bootimg.py ../ref/boot-header.bin ../ref/boot-ramdisk.gz \
+            "$IMG" "../artifacts/boot-${{ matrix.variant }}.img"
+          python3 ../tools/make-bootimg.py ../ref/boot-header.bin ../ref/boot-ramdisk.gz \
+            "$IMG" "../artifacts/boot-${{ matrix.variant }}-nomods.img" --no-ramdisk-mods
+          ( cd ../artifacts && md5sum *.img > BOOT-IMGS.md5 )
+          ls -la ../artifacts/
 
       - uses: actions/upload-artifact@v4
         with:
