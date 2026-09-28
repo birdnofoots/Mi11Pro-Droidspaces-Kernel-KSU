@@ -35,6 +35,14 @@ on:
         description: 'KernelSU tag(仅 allbuiltin-ksu 变体使用)'
         required: false
         default: 'v0.7.6'
+      upstream:
+        description: '内核源码仓库(留空=默认 EcrosoftXiao 5.4.191)'
+        required: false
+        default: ''
+      upstream_branch:
+        description: '内核源码分支(留空=默认 twelve)'
+        required: false
+        default: ''
 env:
   ARCH: arm64
   # runner 是 x86_64,目标是 aarch64 → 必须交叉编译
@@ -187,9 +195,16 @@ jobs:
 
       # ── 源码 ───────────────────────────────────────────────────
       - name: 拉取上游内核源码
+        env:
+          UP_IN: ${{ github.event.inputs.upstream }}
+          BR_IN: ${{ github.event.inputs.upstream_branch }}
         run: |
-          git clone --depth=1 -b "${UPSTREAM_BRANCH}" "${UPSTREAM}" kernel
+          UP="${UP_IN:-$UPSTREAM}"
+          BR="${BR_IN:-$UPSTREAM_BRANCH}"
+          echo "上游仓库: $UP  分支: $BR"
+          git clone --depth=1 -b "$BR" "$UP" kernel
           cd kernel
+          echo "UPSTREAM_USED=$UP@$BR" >> $GITHUB_ENV
           echo "KERNEL_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
           : > .scmversion          # 抑制 git 后缀,保证 vermagic 精确可控
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL)' Makefile
@@ -377,6 +392,24 @@ jobs:
           fi
           find out -name '*.ko' -exec cp {} ../artifacts/ \; 2>/dev/null || true
           ls -la ../artifacts
+
+      - name: kABI CRC 对照(决定原厂模块能否加载)
+        run: |
+          cd kernel
+          SYM=out/Module.symvers
+          cp "$SYM" ../artifacts/Module.symvers 2>/dev/null || true
+          # 原厂内核的权威值:从原厂 .ko 的 __versions 段读出来的
+          declare -A STOCK=( [module_layout]=0x1e5b7ab7 [platform_driver_unregister]=0x4cbcbb6a )
+          echo "| 符号 | 原厂 | 本次构建 | 匹配 |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          for sym in "${!STOCK[@]}"; do
+            got=$(grep -m1 -P "\t$sym\t" "$SYM" | cut -f1)
+            [ -z "$got" ] && got="(未导出)"
+            if [ "$got" = "${STOCK[$sym]}" ]; then ok="✅"; else ok="❌"; fi
+            printf '  %-30s stock=%-12s ours=%-12s %s\n' "$sym" "${STOCK[$sym]}" "$got" "$ok"
+            echo "| $sym | ${STOCK[$sym]} | $got | $ok |" >> $GITHUB_STEP_SUMMARY
+          done
+          echo "=== Module.symvers 行数: $(wc -l < $SYM) ==="
 
       - uses: actions/upload-artifact@v4
         with:
