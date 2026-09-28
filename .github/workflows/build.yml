@@ -448,6 +448,9 @@ jobs:
           with open("../artifacts/CRC-SUMMARY.txt", "w") as fh:
               fh.write("%.2f%% (%d/%d)\n" % (pct, len(match), len(common)))
           PY
+          echo "=== 内核完整性:原厂 2360 个符号里我们导出了多少 ==="
+          python3 ../tools/patch-crcs.py ../ref/stock-crcs.txt out/vmlinux --dry-run 2>&1 \
+            | tee -a ../artifacts/CRC-REPORT.txt | head -8
           echo "| 变体 | CRC 匹配率 |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| ${{ matrix.variant }} | $(cat ../artifacts/CRC-SUMMARY.txt) |" >> $GITHUB_STEP_SUMMARY
