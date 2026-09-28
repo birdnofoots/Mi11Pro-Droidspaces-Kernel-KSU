@@ -72,6 +72,13 @@ jobs:
               "allbuiltin-nokabi": {"defconfig": "vendor/mars_allbuiltin_defconfig",  "lto": "keep", "ksu": "0", "kabi": "0", "desc": "全内建但不打 kABI 补丁(二分用)"},
               "allbuiltin-nowlan": {"defconfig": "vendor/mars_allbuiltin_nowlan_defconfig", "lto": "keep", "ksu": "0", "desc": "全内建但 WLAN 栈退回模块"},
               "droidspaces":      {"defconfig": "vendor/mars_droidspaces_defconfig",  "lto": "keep", "ksu": "0", "desc": "模块式 + Droidspaces(旧基线)"},
+              # ★ 最保守的候选:直接用「上游树自带的 mars_defconfig」,只翻 14 个
+              #   Droidspaces 必需开关,其余一个字节都不动。之前的变体都是拿设备
+              #   A13 的 /proc/config.gz 覆盖到 A12 树上(差异 75 项),很可能就是
+              #   内核起不来的真正原因。
+              "minimal":          {"defconfig": "vendor/mars_minimal_defconfig",      "lto": "keep", "ksu": "0", "kabi": "0", "desc": "树自带配置+仅 Droidspaces 开关,不打 kABI"},
+              "minimal-kabi":     {"defconfig": "vendor/mars_minimal_defconfig",      "lto": "keep", "ksu": "0", "kabi": "1", "desc": "同上 + kABI 补丁(让原厂模块也能加载)"},
+              "minimal-nolto":    {"defconfig": "vendor/mars_minimal_defconfig",      "lto": "none", "ksu": "0", "kabi": "0", "desc": "同上但关 LTO(排查 LTO 变量)"},
           }
           sel = (os.environ.get("SEL") or "").strip()
           names = [s.strip() for s in sel.split(",") if s.strip()] if sel else \
