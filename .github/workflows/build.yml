@@ -94,6 +94,10 @@ jobs:
               #   设备"启动到一半约 10 秒后重启"正好对上 11 秒咬。下面两个变体对齐原厂 / 彻底放宽。
               "qgki-wd20":        {"defconfig": "vendor/mars_qgki_ds_defconfig",      "lto": "keep", "ksu": "0", "kabi": "0", "desc": "qgki + 看门狗对齐原厂(bark 20s / pet 15s)"},
               "qgki-wd60":        {"defconfig": "vendor/mars_qgki_wd60_defconfig",   "lto": "keep", "ksu": "0", "kabi": "0", "desc": "qgki + 看门狗放宽到 bark 60s(诊断:确认是不是看门狗)"},
+              # ★ 诊断:把 panic 时的内核日志写进 boot_a 分区,重启后可以 dd 读出来。
+              #   配合 cmdline 里的 androidboot.init_fatal_panic=1,
+              #   让 init 的致命失败变成内核 panic → pstore/blk 落盘。
+              "qgki-pstore":      {"defconfig": "vendor/mars_qgki_pstore_defconfig", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "qgki + 日志落到 boot_a(pstore/blk),用来抓崩溃原因"},
               "tree0-191":        {"defconfig": "vendor/mars_tree0_defconfig",        "lto": "keep", "ksu": "0", "kabi": "0", "sublevel": "191", "desc": "同上,但不谎报版本(真报 5.4.191)"},
               "nodevt":           {"defconfig": "vendor/mars_nodevt_defconfig",       "lto": "keep", "ksu": "0", "kabi": "0", "desc": "minimal 但关掉 DEVTMPFS(原厂也是关的)"},
               "fbcon":            {"defconfig": "vendor/mars_fbcon_defconfig",        "lto": "keep", "ksu": "0", "kabi": "0", "desc": "minimal + 屏幕内核日志(VT/fbcon/fbdev)"},
