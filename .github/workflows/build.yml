@@ -1,45 +1,95 @@
-name: Build mars kernel (Droidspaces ± KernelSU)
+name: Build mars kernel (Droidspaces)
+
+# 说明
+# ────
+# 目标设备: Xiaomi Mi 11 Pro (mars / mars_eea), Android 13, MIUI V14.0.7.0.TKAEUXM
+# 目标内核: 5.4.233-qgki-gbb70cde46897, 原厂用 AOSP clang 11.0.2 (build 6877366) + LLD 构建
+#
+# 本工作流在 GitHub runner 上编译,产物是裸 Image。
+# 打包成可 fastboot 的 boot.img 由仓库里的 tools/splice-bootimg.py 在本地完成
+# (逐字节拼接原厂 boot.img,保留头部 32 字节原厂签名字段与原厂压缩 ramdisk)。
+#
+# 变体(variant):
+#   control          原厂 .config 原样 + 上游源码不改动 —— 用来判断「源码/工具链本身能不能开机」
+#   allbuiltin       全部驱动内建 + Droidspaces 需求项
+#   allbuiltin-nolto 同上,但关掉 CONFIG_LTO_CLANG(排除 LTO 变量)
+#   allbuiltin-ksu   同上 + 内置 KernelSU
+#   droidspaces      驱动仍为模块 + Droidspaces 需求项(旧基线,仅作对照)
 
 on:
   workflow_dispatch:
     inputs:
-      ksu_tag:
-        description: 'KernelSU tag (留空 = 不集成 KernelSU)'
+      variants:
+        description: '要构建的变体(逗号分隔),留空=默认四个'
         required: false
-        default: ''
-      kabi_variant:
-        description: 'SYSVIPC kABI 补丁变体'
+        default: 'allbuiltin,allbuiltin-nolto,control,allbuiltin-ksu'
+      toolchain:
+        description: '工具链'
         required: true
         type: choice
-        default: '6_7_8'
-        options: ['1_2_3', '3_4_5', '6_7_8']
-      make_anykernel:
-        description: '打包 AnyKernel3 zip'
-        required: true
-        type: boolean
-        default: true
-  push:
-    branches: [main]
-
+        default: 'aosp-clang-11'
+        options:
+          - aosp-clang-11     # 原厂同款: Android clang 11.0.2 r383902b1 (build 6877366)
+          - system-clang      # runner 自带 clang-14(仅作对照)
+      ksu_tag:
+        description: 'KernelSU tag(仅 allbuiltin-ksu 变体使用)'
+        required: false
+        default: 'v0.7.6'
 env:
   ARCH: arm64
-  SUBARCH: arm64
-  # GitHub runner 是 x86_64,必须交叉编译到 aarch64。
-  # 内核 Makefile 会据此推导 clang 的 --target 与 --prefix(见 Makefile:564-570)
+  # runner 是 x86_64,目标是 aarch64 → 必须交叉编译
   CROSS_COMPILE: aarch64-linux-gnu-
-  SUBLEVEL_OVERRIDE: '233'          # 对齐设备内核版本 5.4.233
+  SUBLEVEL_OVERRIDE: '233'
   UPSTREAM: https://github.com/EcrosoftXiao/kernel_xiaomi_mars.git
   UPSTREAM_BRANCH: twelve
 
 jobs:
-  build:
+  # ── 把 variants 输入展开成 matrix ────────────────────────────────
+  prepare:
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+    steps:
+      - id: gen
+        env:
+          SEL: ${{ github.event.inputs.variants }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          all_variants = {
+              "control":          {"defconfig": "vendor/mars_stock_defconfig",        "lto": "keep", "ksu": "0", "desc": "原厂配置对照(源码不改)"},
+              "allbuiltin":       {"defconfig": "vendor/mars_allbuiltin_defconfig",   "lto": "keep", "ksu": "0", "desc": "全内建 + Droidspaces"},
+              "allbuiltin-nolto": {"defconfig": "vendor/mars_allbuiltin_defconfig",   "lto": "none", "ksu": "0", "desc": "全内建 + Droidspaces,关 LTO"},
+              "allbuiltin-ksu":   {"defconfig": "vendor/mars_allbuiltin_defconfig",   "lto": "keep", "ksu": "1", "desc": "全内建 + Droidspaces + KernelSU"},
+              "droidspaces":      {"defconfig": "vendor/mars_droidspaces_defconfig",  "lto": "keep", "ksu": "0", "desc": "模块式 + Droidspaces(旧基线)"},
+          }
+          sel = (os.environ.get("SEL") or "").strip()
+          names = [s.strip() for s in sel.split(",") if s.strip()] if sel else \
+                  ["allbuiltin", "allbuiltin-nolto", "control", "allbuiltin-ksu"]
+          bad = [n for n in names if n not in all_variants]
+          if bad:
+              raise SystemExit("unknown variant(s): %s" % bad)
+          inc = []
+          for n in names:
+              v = dict(all_variants[n]); v["variant"] = n
+              inc.append(v)
+          print("matrix=" + json.dumps({"include": inc}))
+          PY
+          cat "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    name: ${{ matrix.variant }}
     env:
       DEBIAN_FRONTEND: noninteractive
+      VARIANT: ${{ matrix.variant }}
     steps:
-      # ── 磁盘空间 ────────────────────────────────────────────────
-      - name: Free disk space
+      - name: 磁盘空间
         run: |
           sudo rm -rf /usr/share/dotnet /usr/share/swift /opt/ghc \
             /usr/local/lib/android /opt/hostedtoolcache/CodeQL 2>/dev/null || true
@@ -48,86 +98,150 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      # ── 依赖 ───────────────────────────────────────────────────
-      - name: Install build deps
+      - name: 安装依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             git curl ccache bison flex libssl-dev libelf-dev bc python3 \
             python-is-python3 gperf device-tree-compiler libncurses-dev \
-            rsync unzip ca-certificates lz4 xz-utils clang lld llvm cpio zip \
+            rsync unzip ca-certificates lz4 xz-utils cpio zip time \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
-          # 内核 Makefile 用 $(CROSS_COMPILE)elfedit 定位 GCC 工具链目录
-          which aarch64-linux-gnu-elfedit || echo "WARN: 缺少 aarch64 binutils"
 
-      - name: Setup ccache
+      # ── 工具链 ──────────────────────────────────────────────────
+      - name: 安装原厂同款 clang 11.0.2 (r383902b1)
+        if: github.event.inputs.toolchain != 'system-clang'
         run: |
-          echo "CCACHE_DIR=${{ github.workspace }}/.ccache" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=4G" >> $GITHUB_ENV
-          echo "CCACHE_COMPRESS=1" >> $GITHUB_ENV
+          set -euo pipefail
+          DEST="$HOME/aosp-clang"
+          mkdir -p "$DEST"
+          ok=0
+          # 1) Google 官方 prebuilt(android12-release 分支里就是 r383902b1)
+          for d in clang-r383902b1 clang-r383902b; do
+            U="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/${d}.tar.gz"
+            echo "尝试 $U"
+            if curl -fsSL --retry 2 --connect-timeout 20 -o /tmp/clang.tgz "$U"; then
+              rm -rf "$DEST"/*; tar -xzf /tmp/clang.tgz -C "$DEST" && ok=1 && break
+            fi
+          done
+          # 2) GitHub 镜像(manifest_6877366 = 原厂 6877366)
+          if [ "$ok" != 1 ]; then
+            for r in credits-infra/clang-r383902b1 ruoqing501/clang-r383902b1 qssn70/clang-r383902b1; do
+              U="https://codeload.github.com/${r}/tar.gz/refs/heads/main"
+              echo "尝试镜像 $U"
+              if curl -fsSL --retry 2 --connect-timeout 20 -o /tmp/clang.tgz "$U"; then
+                rm -rf /tmp/clangx && mkdir -p /tmp/clangx && tar -xzf /tmp/clang.tgz -C /tmp/clangx
+                SRC=$(find /tmp/clangx -maxdepth 1 -mindepth 1 -type d | head -1)
+                if [ -x "$SRC/bin/clang" ]; then rm -rf "$DEST"/*; cp -a "$SRC"/. "$DEST"/; ok=1; break; fi
+              fi
+            done
+          fi
+          # 3) apt 兜底
+          if [ "$ok" != 1 ]; then
+            echo "::warning::AOSP prebuilt 下载失败,退回 apt clang-11"
+            sudo apt-get install -y --no-install-recommends clang-11 lld-11 || true
+            if command -v clang-11 >/dev/null; then
+              mkdir -p "$DEST/bin"
+              for t in clang clang++ ld.lld llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-strip llvm-ranlib llvm-readelf; do
+                base=${t%-11}; [ -e "/usr/bin/${t}-11" ] && ln -sf "/usr/bin/${t}-11" "$DEST/bin/$base"
+              done
+              [ -e /usr/bin/ld.lld-11 ] && ln -sf /usr/bin/ld.lld-11 "$DEST/bin/ld.lld"
+              ok=1
+            fi
+          fi
+          [ "$ok" = 1 ] || { echo "::error::找不到 clang 11"; exit 1; }
+          # clang 11 prebuilt 需要 libtinfo.so.5
+          if [ ! -e /usr/lib/x86_64-linux-gnu/libtinfo.so.5 ]; then
+            sudo ln -sf /lib/x86_64-linux-gnu/libtinfo.so.6 /usr/lib/x86_64-linux-gnu/libtinfo.so.5 || true
+          fi
+          echo "$DEST/bin" >> $GITHUB_PATH
+          "$DEST/bin/clang" --version || true
 
-      # ── 拉取上游内核源码 ───────────────────────────────────────
-      - name: Clone upstream kernel
+      - name: 选择工具链
         run: |
-          git clone --depth=1 -b ${UPSTREAM_BRANCH} ${UPSTREAM} kernel
+          set -euo pipefail
+          if [ "${{ github.event.inputs.toolchain }}" = "system-clang" ]; then
+            echo "CC=clang"       >> $GITHUB_ENV
+            echo "LD=ld.lld"      >> $GITHUB_ENV
+          else
+            echo "CC=clang"       >> $GITHUB_ENV
+            echo "LD=ld.lld"      >> $GITHUB_ENV
+          fi
+          which clang; clang --version | head -2
+          which ld.lld; ld.lld --version | head -1
+
+      - name: ccache 缓存
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ matrix.variant }}-${{ github.event.inputs.toolchain }}-${{ hashFiles('configs/**') }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ matrix.variant }}-${{ github.event.inputs.toolchain }}-${{ hashFiles('configs/**') }}-
+            ccache-${{ matrix.variant }}-${{ github.event.inputs.toolchain }}-
+
+      - name: 配置 ccache
+        run: |
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=3G"        >> $GITHUB_ENV
+          echo "CCACHE_COMPRESS=1"        >> $GITHUB_ENV
+          echo "CCACHE_SLOPPINESS=time_macros,include_file_mtime" >> $GITHUB_ENV
+
+      # ── 源码 ───────────────────────────────────────────────────
+      - name: 拉取上游内核源码
+        run: |
+          git clone --depth=1 -b "${UPSTREAM_BRANCH}" "${UPSTREAM}" kernel
           cd kernel
           echo "KERNEL_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-          # 阻止 setlocalversion 追加 git 后缀,保证 vermagic 精确可控
-          : > .scmversion
+          : > .scmversion          # 抑制 git 后缀,保证 vermagic 精确可控
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL)' Makefile
 
-      # ── 应用 Droidspaces kABI 补丁 ─────────────────────────────
-      - name: Apply Droidspaces kABI patches
+      # ── Droidspaces kABI 补丁(control 变体不打)──────────────────
+      - name: 应用 Droidspaces kABI 补丁
+        if: matrix.variant != 'control'
         run: |
           cd kernel
-          K=patches
           cp -r ../patches .
           patch -p1 -F5 --no-backup-if-mismatch \
-            < patches/001.GKI-below-6.12-fix_sysvipc_kabi_${{ github.event.inputs.kabi_variant || '6_7_8' }}.patch || true
+            < patches/001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch || true
           patch -p1 -F5 --no-backup-if-mismatch \
             < patches/002.5.10_or_lower_use_android_abi_padding_for_posix_mqueue.patch || true
           rm -f patches/*.rej include/linux/sched/*.rej
-
-          # user.h 第 2 个 hunk 在 5.4.191 上会失败,做等价手工修复
           python3 - <<'PY'
-          import re
           p='include/linux/sched/user.h'
           s=open(p).read()
           if 'ANDROID_KABI_USE(1, unsigned long mq_bytes)' not in s:
-              old="""	/* Miscellaneous per-user rate limit */
-          	struct ratelimit_state ratelimit;
+              old="""\t/* Miscellaneous per-user rate limit */
+          \tstruct ratelimit_state ratelimit;
 
-          	ANDROID_KABI_RESERVE(1);
-          	ANDROID_KABI_RESERVE(2);
+          \tANDROID_KABI_RESERVE(1);
+          \tANDROID_KABI_RESERVE(2);
           };"""
-              new="""	/* Miscellaneous per-user rate limit */
-          	struct ratelimit_state ratelimit;
+              new="""\t/* Miscellaneous per-user rate limit */
+          \tstruct ratelimit_state ratelimit;
 
           #if defined(CONFIG_POSIX_MQUEUE)
-          	ANDROID_KABI_USE(1, unsigned long mq_bytes);
-          	ANDROID_KABI_RESERVE(2);
+          \tANDROID_KABI_USE(1, unsigned long mq_bytes);
+          \tANDROID_KABI_RESERVE(2);
           #else
-          	ANDROID_KABI_RESERVE(1);
-          	ANDROID_KABI_RESERVE(2);
+          \tANDROID_KABI_RESERVE(1);
+          \tANDROID_KABI_RESERVE(2);
           #endif
           };"""
               if old in s:
-                  s=s.replace(old,new,1); open(p,'w').write(s); print('user.h 手工修复完成')
+                  open(p,'w').write(s.replace(old,new,1)); print('user.h 手工修复完成')
               else:
-                  print('WARN: user.h 未匹配到手工修复模板'); raise SystemExit(1)
+                  print('WARN: user.h 未匹配手工修复模板'); raise SystemExit(1)
           else:
               print('user.h 已含 kABI 修复')
           PY
-
           echo "--- 校验 ---"
           grep -c 'ANDROID_KABI_USE(6, struct sysv_sem sysvsem)' include/linux/sched.h
           grep -c 'ANDROID_KABI_USE(1, unsigned long mq_bytes)' include/linux/sched/user.h
 
-      # ── 让 Wi-Fi / 触控 可内建(修 -Werror 与重名符号)─────────
-      - name: Patch for all-builtin build
+      # ── 内建编译所需的树内修复 ─────────────────────────────────
+      - name: 打内建相关补丁
+        if: matrix.variant != 'control' && matrix.variant != 'droidspaces'
         run: |
           cd kernel
-          # 1) qcacld: 内建时会触发 unused-function,而本树顶层硬编码 -Werror
           python3 - <<'PY'
           p='drivers/staging/qcacld-3.0/Kbuild'
           s=open(p).read()
@@ -149,130 +263,128 @@ jobs:
           else:
               print('qcacld 已打过补丁')
           PY
-          # 2) qca-wifi-host-cmn 的 nl80211hdr_put 与 net/wireless 重名 → 改名
           for f in drivers/staging/qca-wifi-host-cmn/utils/nlink/src/wlan_nlink_srv.c \
                    drivers/staging/qca-wifi-host-cmn/utils/nlink/inc/wlan_nlink_srv.h ; do
             sed -i 's/\bvoid \*nl80211hdr_put(/void *qca_nl80211hdr_put(/g; s/\bhdr = nl80211hdr_put(/hdr = qca_nl80211hdr_put(/g' "$f"
           done
           grep -c qca_nl80211hdr_put drivers/staging/qca-wifi-host-cmn/utils/nlink/src/wlan_nlink_srv.c
 
-      # ── 可选:集成 KernelSU ────────────────────────────────────
-      - name: Integrate KernelSU
-        if: github.event.inputs.ksu_tag != ''
+      # ── KernelSU ──────────────────────────────────────────────
+      - name: 集成 KernelSU
+        if: matrix.ksu == '1'
+        env:
+          KSU_TAG: ${{ github.event.inputs.ksu_tag }}
         run: |
           cd kernel
-          KSU="${{ github.event.inputs.ksu_tag }}"
-          echo "集成 KernelSU $KSU"
-          git clone --depth=1 --branch "$KSU" https://github.com/tiann/KernelSU.git drivers/kernelsu
+          TAG="${KSU_TAG:-v0.7.6}"
+          echo "集成 KernelSU $TAG"
+          git clone --depth=1 --branch "$TAG" https://github.com/tiann/KernelSU.git drivers/kernelsu
           rm -rf drivers/kernelsu/.git
-
-          # v0.7.x 把源码放在 kernel/ 子目录,平铺到顶层
           if [ -d drivers/kernelsu/kernel ]; then
             shopt -s dotglob
             mv drivers/kernelsu/kernel/* drivers/kernelsu/
             rmdir drivers/kernelsu/kernel
           fi
-          # 修 Makefile 里没有消费者的 kernelsu-objs
           sed -i 's/^kernelsu-objs := apk_sign\.o$/obj-y += apk_sign.o/' drivers/kernelsu/Makefile || true
           sed -i '/^obj-y += kernelsu\.o$/d' drivers/kernelsu/Makefile || true
-
-          # 接入内核构建
           grep -q 'CONFIG_KSU' drivers/Makefile || printf '\nobj-$(CONFIG_KSU)\t\t+= kernelsu/\n' >> drivers/Makefile
           grep -q 'drivers/kernelsu' drivers/Kconfig || printf '\nsource "drivers/kernelsu/Kconfig"\n' >> drivers/Kconfig
 
-      # ── 生成 .config ───────────────────────────────────────────
-      - name: Configure
+      # ── 配置 ──────────────────────────────────────────────────
+      - name: 生成 .config
         run: |
+          set -euo pipefail
           cd kernel
-          cp ../configs/mars_droidspaces_defconfig arch/arm64/configs/vendor/mars_droidspaces_defconfig
-          if [ "${{ github.event.inputs.ksu_tag }}" != "" ]; then
-            echo 'CONFIG_KSU=y' >> arch/arm64/configs/vendor/mars_droidspaces_defconfig
+          V="${{ matrix.variant }}"
+          case "$V" in
+            control) DEF=vendor/mars_stock_defconfig ;;
+            *)       DEF="${{ matrix.defconfig }}" ;;
+          esac
+          mkdir -p arch/arm64/configs/vendor
+          cp "../configs/$(basename "$DEF")" "arch/arm64/configs/$DEF"
+          [ "$V" = "allbuiltin-ksu" ] && echo 'CONFIG_KSU=y' >> "arch/arm64/configs/$DEF"
+          make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} "$DEF"
+          if [ "${{ matrix.lto }}" = "none" ]; then
+            scripts/config --file out/.config -d LTO_CLANG -d LTO_CLANG_THIN -e LTO_NONE
           fi
-          make O=out -j$(nproc) CC=clang CXX=clang++ LD=ld.lld \
-            SUBLEVEL=${SUBLEVEL_OVERRIDE} vendor/mars_droidspaces_defconfig
-          make O=out -j$(nproc) CC=clang CXX=clang++ LD=ld.lld \
-            SUBLEVEL=${SUBLEVEL_OVERRIDE} olddefconfig
-          echo "=== kernelrelease(应为 5.4.233-qgki-gbb70cde46897) ==="
-          make -s O=out CC=clang CXX=clang++ LD=ld.lld SUBLEVEL=${SUBLEVEL_OVERRIDE} kernelrelease
-          echo "=== 关键配置 ==="
-          for c in SYSVIPC POSIX_MQUEUE IPC_NS PID_NS CGROUP_DEVICE DEVTMPFS USER_NS \
-                   QCA_CLD_WLAN ICNSS2 TOUCHSCREEN_ST_FTS_V521_SPI_K2 FINGERPRINT_GOODIX_FOD KSU ; do
-            printf '  %-38s %s\n' "$c" "$(grep -m1 "^CONFIG_${c}=" out/.config || echo '(未设置)')"
+          make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} olddefconfig
+          echo "=== kernelrelease ==="
+          make -s O=out CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} kernelrelease
+          echo "=== 关键项 ==="
+          for c in SYSVIPC POSIX_MQUEUE IPC_NS PID_NS USER_NS DEVTMPFS TMPFS_POSIX_ACL \
+                   TMPFS_XATTR CGROUP_DEVICE CGROUP_PIDS NETFILTER_XT_MATCH_ADDRTYPE \
+                   MODVERSIONS MODULE_SIG LTO_NONE LTO_CLANG LTO_CLANG_THIN CLANG_VERSION \
+                   LOCALVERSION PSTORE_RAM KSU ARM64_ERRATUM_1742098 ; do
+            printf '  %-32s %s\n' "$c" "$(grep -m1 "^CONFIG_${c}=" out/.config || grep -m1 "^# CONFIG_${c} is not set" out/.config || echo '(不在本树)')"
           done
+          echo "=== 与原厂配置差异 ==="
+          python3 - "../configs/mars_stock_defconfig" out/.config <<'PY'
+          import re,sys
+          def load(p):
+              d={}
+              for l in open(p,errors='ignore'):
+                  l=l.strip()
+                  m=re.match(r'^(CONFIG_[A-Za-z0-9_]+)=(.*)$',l)
+                  if m: d[m.group(1)]=m.group(2); continue
+                  m=re.match(r'^# (CONFIG_[A-Za-z0-9_]+) is not set$',l)
+                  if m: d[m.group(1)]='n'
+              return d
+          a=load(sys.argv[1]); b=load(sys.argv[2])
+          lost=[k for k,v in a.items() if v=='y' and b.get(k)!='y']
+          print('  原厂 y 但本树丢掉/关掉: %d 项'%len(lost))
+          print('  ' + ', '.join(sorted(lost)[:40]))
+          print('  本树 y 而原厂非 y: %d 项'%sum(1 for k,v in b.items() if v=='y' and a.get(k)!='y'))
+          PY
 
-      # ── 编译 ───────────────────────────────────────────────────
-      - name: Build kernel
+      # ── 编译 ──────────────────────────────────────────────────
+      - name: 编译
         run: |
+          set -o pipefail
           cd kernel
-          make O=out -j$(nproc) CC=clang CXX=clang++ LD=ld.lld \
-            SUBLEVEL=${SUBLEVEL_OVERRIDE} 2>&1 | tee /tmp/build.log
-          ls -la out/arch/arm64/boot/Image || { echo "BUILD FAILED"; tail -60 /tmp/build.log; exit 1; }
+          /usr/bin/time -v make O=out -j"$(nproc)" CC="$CC" LD="$LD" \
+            SUBLEVEL=${SUBLEVEL_OVERRIDE} 2>&1 | tee /tmp/build.log | tail -5
+          ls -la out/arch/arm64/boot/Image || { echo "BUILD FAILED"; tail -80 /tmp/build.log; exit 1; }
 
-      # ── 校验产物 ───────────────────────────────────────────────
-      - name: Verify image
+      # ── 校验 ──────────────────────────────────────────────────
+      - name: 校验产物
         run: |
           cd kernel
           IMG=out/arch/arm64/boot/Image
-          echo "=== 内建证据 ==="
+          mkdir -p ../artifacts
+          cp "$IMG" ../artifacts/Image
+          cp out/.config ../artifacts/config.gz.txt 2>/dev/null || cp out/.config ../artifacts/
+          {
+            echo "variant      : ${{ matrix.variant }}"
+            echo "desc         : ${{ matrix.desc }}"
+            echo "defconfig    : ${{ matrix.defconfig }}"
+            echo "kernel_sha   : ${KERNEL_SHA}"
+            echo "kernelrelease: $(make -s O=out CC=$CC LD=$LD SUBLEVEL=${SUBLEVEL_OVERRIDE} kernelrelease)"
+            echo "compiler     : $($CC --version | head -1)"
+            echo "image_bytes  : $(stat -c%s $IMG)"
+            echo "image_md5    : $(md5sum $IMG | cut -d' ' -f1)"
+            echo "lto          : ${{ matrix.lto }} / ksu: ${{ matrix.ksu }}"
+          } > ../artifacts/INFO.txt
+          cat ../artifacts/INFO.txt
+          echo "=== 内建证据(符号出现次数) ==="
           for s in wlan_hdd_cfg80211_init cnss_wlan_register_driver hdd_wlan_startup \
-                   fts_touch_spi xiaomi_touch goodix_fod ufs_qcom_ sde_kms ; do
+                   fts_touch_spi xiaomi_touch goodix_fod ufs_qcom_ sde_kms msm_drm ; do
             printf '  %-32s %s\n' "$s" "$(strings $IMG | grep -c "$s")"
           done
-          echo "=== 版本字符串 ==="
-          strings $IMG | grep -m1 '5.4.233-qgki-gbb70cde46897' || echo "WARN: 未找到目标版本串"
-          if [ "${{ github.event.inputs.ksu_tag }}" != "" ]; then
-            echo "=== KernelSU 证据 ==="
-            strings $IMG | grep -c 'KernelSU' || true
+          echo "=== 版本串 ==="
+          strings $IMG | grep -m1 '5.4.233-qgki' || echo "WARN: 未找到 5.4.233-qgki"
+          if [ "${{ matrix.ksu }}" = "1" ]; then
+            echo "=== KernelSU ==="; strings $IMG | grep -c 'KernelSU' || true
           fi
-          mkdir -p ../artifacts
-          cp $IMG ../artifacts/Image
-          # 收集仍为模块的部分(音频/相机/移动数据),供 APatch 叠加模块使用
           find out -name '*.ko' -exec cp {} ../artifacts/ \; 2>/dev/null || true
-          ls -la ../artifacts | head -20
-
-      # ── AnyKernel3 打包 ────────────────────────────────────────
-      - name: Package AnyKernel3
-        if: github.event.inputs.make_anykernel == 'true'
-        run: |
-          cd /tmp
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
-          cd AnyKernel3
-          rm -rf modules patch ramdisk
-          mkdir -p modules
-          cp $GITHUB_WORKSPACE/artifacts/Image .
-          cat > anykernel.sh <<'AK3'
-          ### AnyKernel3 — mars droidspaces
-          properties() { '
-          kernel.string=mars-droidspaces
-          do.devicecheck=0
-          do.modules=0
-          do.systemless=1
-          do.cleanup=1
-          do.cleanuponabort=0
-          device.name1=mars
-          supported.versions=12,13
-          '; }
-          BLOCK=/dev/block/by-name/boot;
-          IS_SLOT_DEVICE=0;
-          RAMDISK_COMPRESSION=auto;
-          PATCH_VBMETA_FLAG=auto;
-          . tools/ak3-core.sh;
-          dump_boot;
-          write_boot;
-          AK3
-          DATE=$(date +%Y%m%d)
-          KSU="${{ github.event.inputs.ksu_tag }}"
-          NAME="mars-droidspaces${KSU:+-ksu}-${DATE}-${{ env.KERNEL_SHA }}.zip"
-          zip -q -r9 "$NAME" anykernel.sh Image tools/ -x '*.zip'
-          cp "$NAME" $GITHUB_WORKSPACE/artifacts/
+          ls -la ../artifacts
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mars-kernel-${{ env.KERNEL_SHA }}${{ github.event.inputs.ksu_tag && format('-ksu-{0}', github.event.inputs.ksu_tag) || '' }}
+          name: mars-${{ matrix.variant }}-${{ env.KERNEL_SHA }}
           path: artifacts/*
           if-no-files-found: error
           retention-days: 30
 
-      - name: ccache stats
+      - name: ccache 统计
         if: always()
         run: ccache --show-stats || true
