@@ -69,6 +69,7 @@ jobs:
               "allbuiltin":       {"defconfig": "vendor/mars_allbuiltin_defconfig",   "lto": "keep", "ksu": "0", "desc": "全内建 + Droidspaces"},
               "allbuiltin-nolto": {"defconfig": "vendor/mars_allbuiltin_defconfig",   "lto": "none", "ksu": "0", "desc": "全内建 + Droidspaces,关 LTO"},
               "allbuiltin-ksu":   {"defconfig": "vendor/mars_allbuiltin_defconfig",   "lto": "keep", "ksu": "1", "desc": "全内建 + Droidspaces + KernelSU"},
+              "allbuiltin-nokabi": {"defconfig": "vendor/mars_allbuiltin_defconfig",  "lto": "keep", "ksu": "0", "kabi": "0", "desc": "全内建但不打 kABI 补丁(二分用)"},
               "droidspaces":      {"defconfig": "vendor/mars_droidspaces_defconfig",  "lto": "keep", "ksu": "0", "desc": "模块式 + Droidspaces(旧基线)"},
           }
           sel = (os.environ.get("SEL") or "").strip()
@@ -211,7 +212,7 @@ jobs:
 
       # ── Droidspaces kABI 补丁(control 变体不打)──────────────────
       - name: 应用 Droidspaces kABI 补丁
-        if: matrix.variant != 'control'
+        if: matrix.variant != 'control' && matrix.kabi != '0'
         run: |
           cd kernel
           cp -r ../patches .
