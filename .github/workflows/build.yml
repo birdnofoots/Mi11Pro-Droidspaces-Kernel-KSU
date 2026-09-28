@@ -84,6 +84,10 @@ jobs:
               # AVB 是 orange/unlocked、格式/头部/命令行/UFS 时钟 pinctrl 都与原厂一致。
               # 所以是我们内核本身挂了。下面三个用来把范围缩到最小:
               "tree0":            {"defconfig": "vendor/mars_tree0_defconfig",        "lto": "keep", "ksu": "0", "kabi": "0", "desc": "上游树自带配置【零改动】—— 判断这棵树能否启动"},
+              # ★★ 最有希望的一个:换用「QGKI 的 mars 树」(5.4.242,与设备的
+              #    5.4.233-qgki 只差 9 个版本),配置直接用设备原厂完整配置 + 14 个开关。
+              #    之前一直用非 QGKI 的 5.4.191 A12 树配一台 QGKI 设备,这是根本性错配。
+              "qgki":             {"defconfig": "vendor/mars_qgki_ds_defconfig",      "lto": "keep", "ksu": "0", "kabi": "0", "desc": "QGKI mars 树(5.4.242)+ 原厂配置 + Droidspaces 开关"},
               "tree0-191":        {"defconfig": "vendor/mars_tree0_defconfig",        "lto": "keep", "ksu": "0", "kabi": "0", "sublevel": "191", "desc": "同上,但不谎报版本(真报 5.4.191)"},
               "nodevt":           {"defconfig": "vendor/mars_nodevt_defconfig",       "lto": "keep", "ksu": "0", "kabi": "0", "desc": "minimal 但关掉 DEVTMPFS(原厂也是关的)"},
               "fbcon":            {"defconfig": "vendor/mars_fbcon_defconfig",        "lto": "keep", "ksu": "0", "kabi": "0", "desc": "minimal + 屏幕内核日志(VT/fbcon/fbdev)"},
