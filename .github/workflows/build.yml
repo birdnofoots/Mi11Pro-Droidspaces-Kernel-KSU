@@ -84,6 +84,7 @@ jobs:
               # AVB 是 orange/unlocked、格式/头部/命令行/UFS 时钟 pinctrl 都与原厂一致。
               # 所以是我们内核本身挂了。下面三个用来把范围缩到最小:
               "tree0":            {"defconfig": "vendor/mars_tree0_defconfig",        "lto": "keep", "ksu": "0", "kabi": "0", "desc": "上游树自带配置【零改动】—— 判断这棵树能否启动"},
+              "tree0-191":        {"defconfig": "vendor/mars_tree0_defconfig",        "lto": "keep", "ksu": "0", "kabi": "0", "sublevel": "191", "desc": "同上,但不谎报版本(真报 5.4.191)"},
               "nodevt":           {"defconfig": "vendor/mars_nodevt_defconfig",       "lto": "keep", "ksu": "0", "kabi": "0", "desc": "minimal 但关掉 DEVTMPFS(原厂也是关的)"},
               "fbcon":            {"defconfig": "vendor/mars_fbcon_defconfig",        "lto": "keep", "ksu": "0", "kabi": "0", "desc": "minimal + 屏幕内核日志(VT/fbcon/fbdev)"},
           }
@@ -222,6 +223,14 @@ jobs:
           cd kernel
           echo "UPSTREAM_USED=$UP@$BR" >> $GITHUB_ENV
           echo "KERNEL_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          # 每个变体可以覆盖 SUBLEVEL。默认全仓库是 233(把 5.4.191 的源码
+          # 谎报成 5.4.233,为了 pin 住 vermagic);但高通驱动里有很多
+          # LINUX_VERSION_CODE 分支,谎报版本可能让它走错代码路径。
+          # 所以留一个「老老实实报 191」的变体做对照。
+          if [ -n "${{ matrix.sublevel }}" ]; then
+            echo "SUBLEVEL_OVERRIDE=${{ matrix.sublevel }}" >> $GITHUB_ENV
+            echo "本变体 SUBLEVEL 覆盖为 ${{ matrix.sublevel }}"
+          fi
           : > .scmversion          # 抑制 git 后缀,保证 vermagic 精确可控
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL)' Makefile
 
