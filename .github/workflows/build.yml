@@ -521,7 +521,6 @@ jobs:
           IMG=out/arch/arm64/boot/Image
           python3 ../tools/make-bootimg.py ../ref/boot-header.bin ../ref/boot-ramdisk.gz \
             "$IMG" "../artifacts/boot-${{ matrix.variant }}.img"
-            "$IMG" "../artifacts/boot-${{ matrix.variant }}-nomods.img" --no-ramdisk-mods
           ( cd ../artifacts && md5sum *.img > BOOT-IMGS.md5 )
           ls -la ../artifacts/
 
