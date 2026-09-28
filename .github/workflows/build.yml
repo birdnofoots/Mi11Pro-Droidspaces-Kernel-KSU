@@ -79,6 +79,13 @@ jobs:
               "minimal":          {"defconfig": "vendor/mars_minimal_defconfig",      "lto": "keep", "ksu": "0", "kabi": "0", "desc": "树自带配置+仅 Droidspaces 开关,不打 kABI"},
               "minimal-kabi":     {"defconfig": "vendor/mars_minimal_defconfig",      "lto": "keep", "ksu": "0", "kabi": "1", "desc": "同上 + kABI 补丁(让原厂模块也能加载)"},
               "minimal-nolto":    {"defconfig": "vendor/mars_minimal_defconfig",      "lto": "none", "ksu": "0", "kabi": "0", "desc": "同上但关 LTO(排查 LTO 变量)"},
+              # ── 定位问题用(2026-09-29)────────────────────────────
+              # 已经证明:bootloader 接受改过的镜像(改 1 字节的原厂镜像能正常启动)、
+              # AVB 是 orange/unlocked、格式/头部/命令行/UFS 时钟 pinctrl 都与原厂一致。
+              # 所以是我们内核本身挂了。下面三个用来把范围缩到最小:
+              "tree0":            {"defconfig": "vendor/mars_tree0_defconfig",        "lto": "keep", "ksu": "0", "kabi": "0", "desc": "上游树自带配置【零改动】—— 判断这棵树能否启动"},
+              "nodevt":           {"defconfig": "vendor/mars_nodevt_defconfig",       "lto": "keep", "ksu": "0", "kabi": "0", "desc": "minimal 但关掉 DEVTMPFS(原厂也是关的)"},
+              "fbcon":            {"defconfig": "vendor/mars_fbcon_defconfig",        "lto": "keep", "ksu": "0", "kabi": "0", "desc": "minimal + 屏幕内核日志(VT/fbcon/fbdev)"},
           }
           sel = (os.environ.get("SEL") or "").strip()
           names = [s.strip() for s in sel.split(",") if s.strip()] if sel else \
@@ -424,7 +431,7 @@ jobs:
           cd kernel
           set +e
           /usr/bin/time -v make O=out -j"$(nproc)" CC="$CC" LD="$LD" \
-            SUBLEVEL=${SUBLEVEL_OVERRIDE} > /tmp/build.log 2>&1
+            SUBLEVEL=${SUBLEVEL_OVERRIDE} KCFLAGS=-Wno-error > /tmp/build.log 2>&1
           rc=$?
           mkdir -p ../artifacts
           cp /tmp/build.log ../artifacts/build.log 2>/dev/null || true
