@@ -448,6 +448,10 @@ jobs:
           print("可比                            : %d" % len(common))
           print("CRC 完全相同                    : %d = %.2f%%   <- 越高越好,>99%% 说明模块能直接加载"
                 % (len(match), pct))
+          miss = sorted(k for k in stock if k not in ours)
+          print("本内核【完全没提供】的符号      : %d   <- 这个才是硬伤,越接近 0 越好" % len(miss))
+          if miss:
+              print("  " + ", ".join(miss[:30]))
           print()
           print("关键符号:")
           for k in ("module_layout", "platform_driver_unregister", "register_filesystem",
