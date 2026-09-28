@@ -278,11 +278,16 @@ jobs:
           else:
               print('qcacld 已打过补丁')
           PY
-          for f in drivers/staging/qca-wifi-host-cmn/utils/nlink/src/wlan_nlink_srv.c \
-                   drivers/staging/qca-wifi-host-cmn/utils/nlink/inc/wlan_nlink_srv.h ; do
-            sed -i 's/\bvoid \*nl80211hdr_put(/void *qca_nl80211hdr_put(/g; s/\bhdr = nl80211hdr_put(/hdr = qca_nl80211hdr_put(/g' "$f"
-          done
-          grep -c qca_nl80211hdr_put drivers/staging/qca-wifi-host-cmn/utils/nlink/src/wlan_nlink_srv.c
+          # 重名符号:必须把【定义处和所有调用处】一起改名,只改其中一个文件会变成
+          # undefined symbol(EndCredits 那棵树就是这么挂的)。所以整棵树一起改。
+          mapfile -t QF < <(grep -rl 'nl80211hdr_put' drivers/staging/qca-wifi-host-cmn \
+                                                 drivers/staging/qcacld-3.0 2>/dev/null)
+          if [ "${#QF[@]}" -gt 0 ]; then
+            sed -i 's/\bnl80211hdr_put\b/qca_nl80211hdr_put/g' "${QF[@]}"
+            echo "已改名 ${#QF[@]} 个文件: ${QF[*]}"
+          else
+            echo "本树没有 nl80211hdr_put,跳过"
+          fi
 
       # ── KernelSU ──────────────────────────────────────────────
       - name: 集成 KernelSU
