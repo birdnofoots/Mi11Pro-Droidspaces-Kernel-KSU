@@ -523,6 +523,9 @@ jobs:
           python3 ../tools/make-bootimg.py ../ref/boot-header.bin ../ref/boot-ramdisk.gz \
             "$IMG" "../artifacts/boot-${{ matrix.variant }}.img"
           ( cd ../artifacts && md5sum *.img > BOOT-IMGS.md5 )
+          # 把编出来的模块打包 —— 后面要把它们塞进 vendor_boot 的 ramdisk 让 init 加载
+          find out -name '*.ko' -print0 2>/dev/null | tar --null -czf ../artifacts/modules.tgz -T - 2>/dev/null || true
+          echo "modules.tgz: $(stat -c%s ../artifacts/modules.tgz 2>/dev/null || echo 0) 字节, 共 $(find out -name '*.ko' | wc -l) 个 .ko"
           ls -la ../artifacts/
 
       - uses: actions/upload-artifact@v4
