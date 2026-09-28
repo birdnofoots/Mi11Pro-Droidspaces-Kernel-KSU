@@ -305,21 +305,21 @@ jobs:
           grep -q 'CONFIG_KSU' drivers/Makefile || printf '\nobj-$(CONFIG_KSU)\t\t+= kernelsu/\n' >> drivers/Makefile
           grep -q 'drivers/kernelsu' drivers/Kconfig || printf '\nsource "drivers/kernelsu/Kconfig"\n' >> drivers/Kconfig
 
-      # ── 清理树里的悬空引用(很多第三方树把 KernelSU 做成 patch) ──
-      - name: 清理悬空 Kconfig 引用
+      # ── 清理树里的悬空 kernelsu 引用 ─────────────────────────
+      # 第三方树普遍把 KernelSU 做成 patch:drivers/Kconfig 里留了 source 行、
+      # drivers/Makefile 里留了 obj-y += kernelsu/,但目录并不在仓库里。
+      # tanz3 甚至是 obj-y(无条件内建),不处理连 Kconfig 都解析不过。
+      - name: 清理悬空 kernelsu 引用
         run: |
           cd kernel || exit 0
-          if grep -q 'drivers/kernelsu/Kconfig' drivers/Kconfig 2>/dev/null && [ ! -e drivers/kernelsu/Kconfig ]; then
-            if [ "${{ matrix.ksu }}" = "1" ]; then
-              echo "KSU 变体会在下一步生成 drivers/kernelsu/Kconfig,先放个占位"
-              mkdir -p drivers/kernelsu
-              printf 'config KSU\n\tbool "KernelSU"\n\tdefault n\n' > drivers/kernelsu/Kconfig
-            else
-              sed -i '\#source "drivers/kernelsu/Kconfig"#d' drivers/Kconfig
-              echo "已移除悬空的 kernelsu source 行"
-            fi
+          if [ ! -e drivers/kernelsu/Makefile ]; then
+            echo "drivers/kernelsu 不存在 → 清掉树里所有 kernelsu 引用"
+            sed -i '/kernelsu/d' drivers/Kconfig drivers/Makefile 2>/dev/null || true
+          else
+            echo "drivers/kernelsu 存在(集成 KernelSU 的那一步已 clone),保留引用"
           fi
-          grep -c 'drivers/kernelsu/Kconfig' drivers/Kconfig || true
+          echo "--- 剩余 kernelsu 引用 ---"
+          grep -n kernelsu drivers/Kconfig drivers/Makefile 2>/dev/null || echo "  (无)"
 
       # ── 配置 ──────────────────────────────────────────────────
       - name: 生成 .config
