@@ -89,6 +89,11 @@ jobs:
               #    之前一直用非 QGKI 的 5.4.191 A12 树配一台 QGKI 设备,这是根本性错配。
               "qgki":             {"defconfig": "vendor/mars_qgki_ds_defconfig",      "lto": "keep", "ksu": "0", "kabi": "0", "desc": "QGKI mars 树(5.4.242)+ 原厂配置 + Droidspaces 开关"},
               "qgki-fbcon":       {"defconfig": "vendor/mars_qgki_fbcon_defconfig", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "同上 + 屏幕内核日志(panic 停机不重启,便于拍照)"},
+              # ★ 看门狗:这棵树的 drivers/soc/qcom/Kconfig 用 `range 11000 11000`
+              #   把 bark 锁死在 11 秒、pet 锁死在 9.36 秒;原厂是 20 秒 / 15 秒。
+              #   设备"启动到一半约 10 秒后重启"正好对上 11 秒咬。下面两个变体对齐原厂 / 彻底放宽。
+              "qgki-wd20":        {"defconfig": "vendor/mars_qgki_ds_defconfig",      "lto": "keep", "ksu": "0", "kabi": "0", "desc": "qgki + 看门狗对齐原厂(bark 20s / pet 15s)"},
+              "qgki-wd60":        {"defconfig": "vendor/mars_qgki_wd60_defconfig",   "lto": "keep", "ksu": "0", "kabi": "0", "desc": "qgki + 看门狗放宽到 bark 60s(诊断:确认是不是看门狗)"},
               "tree0-191":        {"defconfig": "vendor/mars_tree0_defconfig",        "lto": "keep", "ksu": "0", "kabi": "0", "sublevel": "191", "desc": "同上,但不谎报版本(真报 5.4.191)"},
               "nodevt":           {"defconfig": "vendor/mars_nodevt_defconfig",       "lto": "keep", "ksu": "0", "kabi": "0", "desc": "minimal 但关掉 DEVTMPFS(原厂也是关的)"},
               "fbcon":            {"defconfig": "vendor/mars_fbcon_defconfig",        "lto": "keep", "ksu": "0", "kabi": "0", "desc": "minimal + 屏幕内核日志(VT/fbcon/fbdev)"},
@@ -281,6 +286,24 @@ jobs:
           echo "--- 校验 ---"
           grep -c 'ANDROID_KABI_USE(6, struct sysv_sem sysvsem)' include/linux/sched.h
           grep -c 'ANDROID_KABI_USE(1, unsigned long mq_bytes)' include/linux/sched/user.h
+
+      # ── 解开看门狗的 range 锁 ────────────────────────────────
+      - name: 对齐原厂 watchdog 时间
+        run: |
+          cd kernel
+          python3 - <<'PY'
+          p='drivers/soc/qcom/Kconfig'
+          s=open(p).read()
+          n=0
+          for a,b in [('range 11000 11000','range 11000 60000'),
+                      ('range 9360 9360','range 9360 45000')]:
+              if a in s:
+                  s=s.replace(a,b); n+=1
+          open(p,'w').write(s)
+          print('watchdog range 解锁处数:', n)
+          PY
+          grep -A 5 'config QCOM_WATCHDOG_BARK_TIME' drivers/soc/qcom/Kconfig | head -7
+          grep -A 5 'config QCOM_WATCHDOG_PET_TIME' drivers/soc/qcom/Kconfig | head -7
 
       # ── 内建编译所需的树内修复 ─────────────────────────────────
       - name: 打内建相关补丁
