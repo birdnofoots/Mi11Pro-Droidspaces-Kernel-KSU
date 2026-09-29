@@ -94,6 +94,10 @@ jobs:
               #   设备"启动到一半约 10 秒后重启"正好对上 11 秒咬。下面两个变体对齐原厂 / 彻底放宽。
               "qgki-wd20":        {"defconfig": "vendor/mars_qgki_ds_defconfig",      "lto": "keep", "ksu": "0", "kabi": "0", "desc": "qgki + 看门狗对齐原厂(bark 20s / pet 15s)"},
               "qgki-wd60":        {"defconfig": "vendor/mars_qgki_wd60_defconfig",   "lto": "keep", "ksu": "0", "kabi": "0", "desc": "qgki + 看门狗放宽到 bark 60s(诊断:确认是不是看门狗)"},
+              # ★ 内核侧日志落盘:每 2 秒把 log_buf 写到 boot_b 偏移 128MB。
+              #   不依赖 init / SELinux / 用户态 —— 硬复位前最后一次写入已在盘上。
+              #   读回见 TAKEOVER.md 第 15 节。
+              "qgki-logk":        {"defconfig": "vendor/mars_qgki_ds_defconfig",      "lto": "keep", "ksu": "0", "kabi": "0", "desc": "qgki + logdump(内核日志落到 boot_b 尾部)"},
               # ★ 诊断:把 panic 时的内核日志写进 boot_a 分区,重启后可以 dd 读出来。
               #   配合 cmdline 里的 androidboot.init_fatal_panic=1,
               #   让 init 的致命失败变成内核 panic → pstore/blk 落盘。
@@ -290,6 +294,22 @@ jobs:
           echo "--- 校验 ---"
           grep -c 'ANDROID_KABI_USE(6, struct sysv_sem sysvsem)' include/linux/sched.h
           grep -c 'ANDROID_KABI_USE(1, unsigned long mq_bytes)' include/linux/sched/user.h
+
+      # ── 接入 logdump:内核日志周期性落盘(见 patches/logdump.c)──
+      - name: 接入 logdump(内核日志落盘)
+        run: |
+          cd kernel
+          if [ -f ../patches/logdump.c ]; then
+            cp ../patches/logdump.c drivers/soc/qcom/logdump.c
+            # 直接挂进 Makefile,不需要改 Kconfig
+            grep -q 'logdump.o' drivers/soc/qcom/Makefile || echo 'obj-y += logdump.o' >> drivers/soc/qcom/Makefile
+            echo "=== logdump 接入情况 ==="
+            ls -la drivers/soc/qcom/logdump.c
+            tail -3 drivers/soc/qcom/Makefile
+          else
+            echo "::error::找不到 patches/logdump.c"
+            exit 1
+          fi
 
       # ── 解开看门狗的 range 锁 ────────────────────────────────
       - name: 对齐原厂 watchdog 时间
