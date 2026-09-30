@@ -128,6 +128,40 @@ static void logdump_write_to_disk(const char *data, size_t len)
 	filp_close(f, NULL);
 }
 
+/*
+ * 状态记录:写在日志区之后 3MB 处(即偏移 131MB)。
+ * 万一日志没写成功,这里能留下原因,下次不用再猜。
+ * 格式:"KLOGSTAT" + seq(4) + errcode(4) + len(4)
+ */
+#define LOGDUMP_STAT_OFFSET  (LOGDUMP_OFFSET + 3ULL * 1024 * 1024)
+
+static void logdump_write_status(int errcode, size_t len)
+{
+	struct file *f;
+	char rec[24];
+	loff_t pos = LOGDUMP_STAT_OFFSET;
+	int n;
+
+	memcpy(rec, "KLOGSTAT", 8);
+	memcpy(rec + 8, &logdump_seq, 4);
+	memcpy(rec + 12, &errcode, 4);
+	{
+		u32 l32 = (u32)len;
+		memcpy(rec + 16, &l32, 4);
+	}
+
+	f = filp_open(LOGDUMP_PATH_BYNAME, O_WRONLY | O_LARGEFILE, 0);
+	if (IS_ERR(f))
+		f = filp_open(LOGDUMP_PATH_RAW, O_WRONLY | O_LARGEFILE, 0);
+	if (IS_ERR(f))
+		return;   /* 连状态都写不了,只能放弃 */
+
+	n = kernel_write(f, rec, 20, &pos);
+	(void)n;
+	vfs_fsync(f, 1);
+	filp_close(f, NULL);
+}
+
 static void logdump_dump(struct kmsg_dumper *dumper,
 			 enum kmsg_dump_reason reason)
 {
@@ -137,13 +171,25 @@ static void logdump_dump(struct kmsg_dumper *dumper,
 		logdump_write_to_disk(logdump_buf, len);
 }
 
+/*
+ * 注意:v1 用 kmsg_dump() 触发,结果什么都没写出来 ——
+ * kmsg_dump() 是给 panic/oops 用的,从 workqueue 调用会被静默忽略。
+ * 正确做法:kmsg_dump_rewind() 重置游标,然后直接收集。
+ */
 static void logdump_work_fn(struct work_struct *w)
 {
-	/*
-	 * 触发一次 kmsg_dump,它会把所有已注册 dumper(包括我们自己)叫一遍。
-	 * reason 用 RESTART 之外的任意合法值即可,这里用 OOPS 走非 panic 路径。
-	 */
-	kmsg_dump(KMSG_DUMP_OOPS);
+	size_t len;
+
+	kmsg_dump_rewind(&logdump_dumper);
+	len = logdump_collect();
+
+	if (len) {
+		logdump_write_to_disk(logdump_buf, len);
+		logdump_write_status(0, len);
+	} else {
+		logdump_write_status(-ENODATA, 0);
+	}
+
 	queue_delayed_work(system_wq, &logdump_work,
 			   msecs_to_jiffies(LOGDUMP_PERIOD_MS));
 }
