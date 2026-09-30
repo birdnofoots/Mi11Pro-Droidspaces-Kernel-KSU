@@ -170,8 +170,15 @@ out:
 			   msecs_to_jiffies(PERIOD_MS));
 }
 
+/* 空的 dump 回调:5.4 的 kmsg_dump_register() 要求 dump 非空 */
+static void logdump_dump_noop(struct kmsg_dumper *dumper,
+			      enum kmsg_dump_reason reason)
+{
+}
+
 static int __init logdump_init(void)
 {
+	logdump_dumper.dump = logdump_dump_noop;
 	logdump_buf = vmalloc(4U * 1024 * 1024);
 	if (!logdump_buf) {
 		pr_err("logdump: 缓冲区分配失败\n");
