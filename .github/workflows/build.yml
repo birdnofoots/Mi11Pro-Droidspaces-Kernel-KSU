@@ -295,49 +295,10 @@ jobs:
           grep -c 'ANDROID_KABI_USE(6, struct sysv_sem sysvsem)' include/linux/sched.h
           grep -c 'ANDROID_KABI_USE(1, unsigned long mq_bytes)' include/linux/sched/user.h
 
-      # ── fbcon 修复 v2:techpack 整体编入(去掉 CONFIG_DRM_MSM 开关)──
       # 之前漏编的对象 msm_fb.o/msm_gem.o 嵌在 techpack 的
       # "msm_drm-$(CONFIG_DRM_MSM) +=" 列表里,而我们没开 CONFIG_DRM_MSM →
       # 整个 msm_drm 不编 → 链接失败。
       # 直接用 sed 在 repo 上替换 Makefile,改为无条件编译。
-      - name: fbcon v2 修复:让 techpack 的 msm_drm 整体编译
-        run: |
-          cd kernel
-          sed -i 's|^msm_drm-$(CONFIG_DRM_MSM) +=|msm_drm-y :=|' techpack/display/msm/Makefile
-          sed -i 's|^obj-$(CONFIG_DISPLAY_BUILD)	+= msm_drm.o|obj-y	+= msm_drm.o|' techpack/display/msm/Makefile
-          echo "=== 修改后 techpack Makefile 关键行 ==="
-          grep -n 'msm_drm[-y]' techpack/display/msm/Makefile | head -6
-
-
-      #   msm_drm-$(CONFIG_DRM_MSM) += msm_fb.o msm_gem.o ...
-      #   obj-$(CONFIG_DISPLAY_BUILD) += msm_drm.o
-      # 这两个都要求 CONFIG_DRM_MSM=y,而我们没开它(显示由 techpack 提供)→
-      # msm_fb.o/msm_gem.o 整体漏编,msm_fbdev 链接失败。
-      # 改成无条件:把 CONFIG_DRM_MSM 开关去掉。
-      - name: fbcon 修复 v2:让 techpack 的 msm_drm 整体编译
-        run: |
-          cd kernel
-          python3 - <<'PY'
-          p = 'techpack/display/msm/Makefile'
-          s = open(p).read()
-          n = 0
-          patches = [
-              ('msm_drm-$(CONFIG_DRM_MSM) += \
-	msm_atomic.o',
-               'msm_drm-y := \
-	msm_atomic.o'),
-              ('obj-$(CONFIG_DISPLAY_BUILD)	+= msm_drm.o',
-               'obj-y	+= msm_drm.o'),
-          ]
-          for old, new in patches:
-              if old in s:
-                  s = s.replace(old, new, 1); n += 1
-                  print(f"已打补丁: {old[:30]}...")
-          open(p, 'w').write(s)
-          print(f"补丁处 {n} 处")
-          PY
-          grep -n 'msm_drm[-y]' techpack/display/msm/Makefile | head -5
-
       # ── 修 fbcon 链接错误:排除上游 msm_fbdev.o ──────────────
       # 原因:drivers/gpu/drm/msm/Makefile 里
       #   msm-$(CONFIG_DRM_FBDEV_EMULATION) += msm_fbdev.o
@@ -345,23 +306,20 @@ jobs:
       # CONFIG_DRM_MSM 未开 ⇒ msm.o(含 msm_gem.o/msm_fb.o)整体没编,
       # 但 msm_fbdev.o 被编了 ⇒ 链接时一堆 undefined symbol。
       # 去掉它,保留 CONFIG_DRM_FBDEV_EMULATION=y 让 techpack 的 fbdev 生效。
-      - name: 修 fbcon 链接(去掉上游 msm_fbdev.o)
+      # ── 接入 logdump:内核日志周期性落盘(见 patches/logdump.c)──
+# ── fbcon 修复:让 techpack 的 msm_drm 整体编入 ─────────────
+      # 之前漏编的对象 msm_fb.o / msm_gem.o 等嵌在 techpack 的
+      #   msm_drm-$(CONFIG_DRM_MSM) += ...
+      # 列表里;我们的 .config 里 CONFIG_DRM_MSM 没开 → 整个 msm_drm 不编,
+      # 链接报缺 msm_framebuffer_bo / msm_gem_* 等符号。
+      # 改法:把这两个条件改成无条件,让 techpack 整体编入。
+      - name: fbcon 修复 v2(去掉 CONFIG_DRM_MSM 开关)
         run: |
           cd kernel
-          python3 - <<'PY'
-          p = 'drivers/gpu/drm/msm/Makefile'
-          s = open(p).read()
-          old = 'msm-$(CONFIG_DRM_FBDEV_EMULATION) += msm_fbdev.o'
-          if old in s:
-              s = s.replace(old, '# ' + old + '   # 排除:见 CI 注释,techpack 自带 fbdev', 1)
-              open(p, 'w').write(s)
-              print('已注释掉 msm_fbdev.o')
-          else:
-              print('WARN: 未找到 msm_fbdev.o 那一行,可能已被改')
-          PY
-          grep -n 'msm_fbdev' drivers/gpu/drm/msm/Makefile || true
-
-      # ── 接入 logdump:内核日志周期性落盘(见 patches/logdump.c)──
+          sed -i 's|^msm_drm-$(CONFIG_DRM_MSM) +=|msm_drm-y :=|' techpack/display/msm/Makefile
+          sed -i 's|^obj-$(CONFIG_DISPLAY_BUILD)	+= msm_drm.o|obj-y	+= msm_drm.o|' techpack/display/msm/Makefile
+          echo "=== 修改后 techpack Makefile 关键行 ==="
+          grep -n 'msm_drm[-y]' techpack/display/msm/Makefile | head -6
       - name: 接入 logdump(内核日志落盘)
         run: |
           cd kernel
