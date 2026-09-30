@@ -295,8 +295,20 @@ jobs:
           grep -c 'ANDROID_KABI_USE(6, struct sysv_sem sysvsem)' include/linux/sched.h
           grep -c 'ANDROID_KABI_USE(1, unsigned long mq_bytes)' include/linux/sched/user.h
 
-      # ── fbcon 链接修复(v2):让 techpack 整体编入,绕开 CONFIG_DRM_MSM ──
-      # techpack/display/msm/Makefile 里:
+      # ── fbcon 修复 v2:techpack 整体编入(去掉 CONFIG_DRM_MSM 开关)──
+      # 之前漏编的对象 msm_fb.o/msm_gem.o 嵌在 techpack 的
+      # "msm_drm-$(CONFIG_DRM_MSM) +=" 列表里,而我们没开 CONFIG_DRM_MSM →
+      # 整个 msm_drm 不编 → 链接失败。
+      # 直接用 sed 在 repo 上替换 Makefile,改为无条件编译。
+      - name: fbcon v2 修复:让 techpack 的 msm_drm 整体编译
+        run: |
+          cd kernel
+          sed -i 's|^msm_drm-$(CONFIG_DRM_MSM) +=|msm_drm-y :=|' techpack/display/msm/Makefile
+          sed -i 's|^obj-$(CONFIG_DISPLAY_BUILD)	+= msm_drm.o|obj-y	+= msm_drm.o|' techpack/display/msm/Makefile
+          echo "=== 修改后 techpack Makefile 关键行 ==="
+          grep -n 'msm_drm[-y]' techpack/display/msm/Makefile | head -6
+
+
       #   msm_drm-$(CONFIG_DRM_MSM) += msm_fb.o msm_gem.o ...
       #   obj-$(CONFIG_DISPLAY_BUILD) += msm_drm.o
       # 这两个都要求 CONFIG_DRM_MSM=y,而我们没开它(显示由 techpack 提供)→
