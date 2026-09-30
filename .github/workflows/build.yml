@@ -295,6 +295,37 @@ jobs:
           grep -c 'ANDROID_KABI_USE(6, struct sysv_sem sysvsem)' include/linux/sched.h
           grep -c 'ANDROID_KABI_USE(1, unsigned long mq_bytes)' include/linux/sched/user.h
 
+      # ── fbcon 链接修复(v2):让 techpack 整体编入,绕开 CONFIG_DRM_MSM ──
+      # techpack/display/msm/Makefile 里:
+      #   msm_drm-$(CONFIG_DRM_MSM) += msm_fb.o msm_gem.o ...
+      #   obj-$(CONFIG_DISPLAY_BUILD) += msm_drm.o
+      # 这两个都要求 CONFIG_DRM_MSM=y,而我们没开它(显示由 techpack 提供)→
+      # msm_fb.o/msm_gem.o 整体漏编,msm_fbdev 链接失败。
+      # 改成无条件:把 CONFIG_DRM_MSM 开关去掉。
+      - name: fbcon 修复 v2:让 techpack 的 msm_drm 整体编译
+        run: |
+          cd kernel
+          python3 - <<'PY'
+          p = 'techpack/display/msm/Makefile'
+          s = open(p).read()
+          n = 0
+          patches = [
+              ('msm_drm-$(CONFIG_DRM_MSM) += \
+	msm_atomic.o',
+               'msm_drm-y := \
+	msm_atomic.o'),
+              ('obj-$(CONFIG_DISPLAY_BUILD)	+= msm_drm.o',
+               'obj-y	+= msm_drm.o'),
+          ]
+          for old, new in patches:
+              if old in s:
+                  s = s.replace(old, new, 1); n += 1
+                  print(f"已打补丁: {old[:30]}...")
+          open(p, 'w').write(s)
+          print(f"补丁处 {n} 处")
+          PY
+          grep -n 'msm_drm[-y]' techpack/display/msm/Makefile | head -5
+
       # ── 修 fbcon 链接错误:排除上游 msm_fbdev.o ──────────────
       # 原因:drivers/gpu/drm/msm/Makefile 里
       #   msm-$(CONFIG_DRM_FBDEV_EMULATION) += msm_fbdev.o
