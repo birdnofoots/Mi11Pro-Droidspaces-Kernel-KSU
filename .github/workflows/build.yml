@@ -295,6 +295,29 @@ jobs:
           grep -c 'ANDROID_KABI_USE(6, struct sysv_sem sysvsem)' include/linux/sched.h
           grep -c 'ANDROID_KABI_USE(1, unsigned long mq_bytes)' include/linux/sched/user.h
 
+      # ── 修 fbcon 链接错误:排除上游 msm_fbdev.o ──────────────
+      # 原因:drivers/gpu/drm/msm/Makefile 里
+      #   msm-$(CONFIG_DRM_FBDEV_EMULATION) += msm_fbdev.o
+      # 这一行不受 CONFIG_DRM_MSM 约束;而我们的显示由 techpack 提供,
+      # CONFIG_DRM_MSM 未开 ⇒ msm.o(含 msm_gem.o/msm_fb.o)整体没编,
+      # 但 msm_fbdev.o 被编了 ⇒ 链接时一堆 undefined symbol。
+      # 去掉它,保留 CONFIG_DRM_FBDEV_EMULATION=y 让 techpack 的 fbdev 生效。
+      - name: 修 fbcon 链接(去掉上游 msm_fbdev.o)
+        run: |
+          cd kernel
+          python3 - <<'PY'
+          p = 'drivers/gpu/drm/msm/Makefile'
+          s = open(p).read()
+          old = 'msm-$(CONFIG_DRM_FBDEV_EMULATION) += msm_fbdev.o'
+          if old in s:
+              s = s.replace(old, '# ' + old + '   # 排除:见 CI 注释,techpack 自带 fbdev', 1)
+              open(p, 'w').write(s)
+              print('已注释掉 msm_fbdev.o')
+          else:
+              print('WARN: 未找到 msm_fbdev.o 那一行,可能已被改')
+          PY
+          grep -n 'msm_fbdev' drivers/gpu/drm/msm/Makefile || true
+
       # ── 接入 logdump:内核日志周期性落盘(见 patches/logdump.c)──
       - name: 接入 logdump(内核日志落盘)
         run: |
