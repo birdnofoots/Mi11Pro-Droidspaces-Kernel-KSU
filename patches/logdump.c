@@ -1,42 +1,40 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * logdump.c —— 把内核日志周期性写到一块可牺牲的磁盘区域
+ * logdump.c (v3) —— 把内核日志周期性写到一块可牺牲的磁盘区域
  *
- * 目的:设备被硬件复位(看门狗/电源)时,内核来不及留下任何日志。
- *      本驱动每 2 秒把整份 log_buf 写到 boot 分区的零填充区,
- *      所以崩溃前最后一次写入必然已经在盘上。
+ * v1 失败:用 kmsg_dump() 触发,而它只在 panic/oops 上下文生效,workqueue 里是空操作
+ * v2 失败:用 filp_open("/dev/block/...") 走路径,但那些节点是 ueventd(用户态)建的,
+ *          内核早期解析不到;且状态函数在打不开设备时直接 return ⇒ 失败毫无痕迹
+ * v3 修法:
+ *   1. blk_lookup_devt("sde37",0) 拿 dev_t → blkdev_get_by_dev() 打开,不依赖 /dev
+ *   2. 写盘用 __getblk + memcpy + mark_buffer_dirty + sync_dirty_buffer
+ *   3. 只写日志"最后 256KB"(崩溃现场在末尾),降低 I/O
+ *   4. 失败尽量留痕:状态记录 + pr_err(固定前缀 logdump:)
  *
- * 目标(经实测选定):
- *   /dev/block/by-name/boot_b  偏移 128MB,上限 4MB
- * 依据:原厂 boot 镜像真实内容只到约 72MB,之后到 192MB 全是零填充,
- *      写 128MB 处不影响镜像,ABL 只读 header 描述的范围。
- *
- * 读回(需要 root):
- *   adb shell su -c 'dd if=/dev/block/by-name/boot_b bs=4096 skip=32768 count=1024'
- *   | strings | less
+ * 目标:mars 的 boot_b = /dev/block/sde37,偏移 128MB(日志)/ 131MB(状态)
+ *       依据:boot 镜像真实内容只到 ~72MB,128MB 之后是零填充,写入安全
  */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/workqueue.h>
-#include <linux/fs.h>
-#include <linux/file.h>
-#include <linux/delay.h>
-#include <linux/string.h>
-#include <linux/slab.h>
-#include <linux/printk.h>
+#include <linux/blkdev.h>
+#include <linux/buffer_head.h>
 #include <linux/kmsg_dump.h>
 #include <linux/vmalloc.h>
+#include <linux/string.h>
+#include <linux/delay.h>
 
-#define LOGDUMP_PATH_BYNAME  "/dev/block/by-name/boot_b"
-#define LOGDUMP_PATH_RAW     "/dev/block/sde37"      /* mars: boot_b 的实际节点 */
-#define LOGDUMP_OFFSET       (128ULL * 1024 * 1024)  /* 128MB,零填充区 */
-#define LOGDUMP_MAXLEN       (4U * 1024 * 1024)      /* 4MB 上限 */
-#define LOGDUMP_PERIOD_MS    2000
-#define LOGDUMP_MAGIC        "KLOGDMP1"
+#define TARGET_DISK	"sde37"
+#define LOG_OFFSET	(128ULL * 1024 * 1024)
+#define STAT_OFFSET	(131ULL * 1024 * 1024)
+#define TAIL_LEN	(256U * 1024)
+#define SEC_SIZE	4096
+#define PERIOD_MS	2000
+#define MAGIC_LOG	"KLOGDMP3"
+#define MAGIC_STAT	"KLOGSTT3"
 
-/* 记录头:magic(8) + seq(4) + len(4) = 16 字节 */
 struct logdump_hdr {
 	char	magic[8];
 	u32	seq;
@@ -47,178 +45,151 @@ static struct delayed_work	logdump_work;
 static struct kmsg_dumper	logdump_dumper;
 static char			*logdump_buf;
 static u32			logdump_seq;
-static bool			logdump_opened_once;
 
-/*
- * 收集整份内核日志到 logdump_buf,返回长度(不含结尾 0)。
- * 只能在 kmsg_dumper 回调里调用 kmsg_dump_get_buffer(),所以本函数
- * 由 logdump_dump() 调用。
- */
+static struct block_device *logdump_get_bdev(void)
+{
+	dev_t devt;
+	struct block_device *bdev;
+
+	devt = blk_lookup_devt(TARGET_DISK, 0);
+	if (!devt) {
+		pr_err("logdump: 找不到块设备 %s\n", TARGET_DISK);
+		return NULL;
+	}
+	bdev = blkdev_get_by_dev(devt, FMODE_READ | FMODE_WRITE, NULL);
+	if (IS_ERR(bdev)) {
+		pr_err("logdump: 打开 %s 失败 %ld\n", TARGET_DISK, PTR_ERR(bdev));
+		return NULL;
+	}
+	return bdev;
+}
+
+static int logdump_write_at(struct block_device *bdev, u64 off,
+			    const void *data, size_t len)
+{
+	size_t done = 0;
+
+	while (done < len) {
+		struct buffer_head *bh;
+		sector_t blk = (sector_t)((off + done) / SEC_SIZE);
+
+		bh = __getblk(bdev, blk, SEC_SIZE);
+		if (!bh)
+			return -ENOMEM;
+		memcpy(bh->b_data, (const char *)data + done, SEC_SIZE);
+		set_buffer_uptodate(bh);
+		mark_buffer_dirty(bh);
+		sync_dirty_buffer(bh);
+		brelse(bh);
+		done += SEC_SIZE;
+	}
+	return 0;
+}
+
+static void logdump_write_status(int errcode, size_t len)
+{
+	struct block_device *bdev;
+	char rec[24];
+	u32 l32 = (u32)len;
+
+	memcpy(rec, MAGIC_STAT, 8);
+	memcpy(rec + 8, &logdump_seq, 4);
+	memcpy(rec + 12, &errcode, 4);
+	memcpy(rec + 16, &l32, 4);
+
+	bdev = logdump_get_bdev();
+	if (!bdev) {
+		pr_err("logdump: 状态写不了(拿不到设备) errcode=%d\n", errcode);
+		return;
+	}
+	logdump_write_at(bdev, STAT_OFFSET, rec, sizeof(rec));
+	blkdev_put(bdev, FMODE_READ | FMODE_WRITE);
+}
+
 static size_t logdump_collect(void)
 {
-	size_t len = 0;
+	size_t total = 0;
 
 	if (!logdump_buf)
 		return 0;
 
-	/*
-	 * 5.4 的签名:bool kmsg_dump_get_buffer(dumper, syslog, buf, size, &len)
-	 * 每次取一段,取完返回 false。连续调用可拿到后续内容。
-	 */
-	while (len < LOGDUMP_MAXLEN) {
+	kmsg_dump_rewind(&logdump_dumper);
+	while (total < 4U * 1024 * 1024) {
 		size_t n = 0;
 		bool more;
 
 		more = kmsg_dump_get_buffer(&logdump_dumper, false,
-					    logdump_buf + len,
-					    LOGDUMP_MAXLEN - len, &n);
+					    logdump_buf + total,
+					    4U * 1024 * 1024 - total, &n);
 		if (n == 0)
 			break;
-		len += n;
+		total += n;
 		if (!more)
 			break;
 	}
-	return len;
+	return total;
 }
 
-/*
- * 真正落盘。在 workqueue 上下文执行(可以睡眠)。
- */
-static void logdump_write_to_disk(const char *data, size_t len)
+static void logdump_work_fn(struct work_struct *w)
 {
-	struct file *f;
+	struct block_device *bdev;
+	size_t total, len;
+	const char *tail;
 	struct logdump_hdr hdr;
-	loff_t pos = LOGDUMP_OFFSET;
-	ssize_t ret;
+	int ret;
 
-	if (!data || len == 0)
-		return;
-
-	/* 优先用 by-name;早期 ueventd 还没建好软链时退回裸节点 */
-	f = filp_open(LOGDUMP_PATH_BYNAME, O_WRONLY | O_LARGEFILE, 0);
-	if (IS_ERR(f)) {
-		f = filp_open(LOGDUMP_PATH_RAW, O_WRONLY | O_LARGEFILE, 0);
-		if (IS_ERR(f)) {
-			pr_debug("logdump: 打不开目标设备,稍后重试\n");
-			return;
-		}
-	}
-	if (!logdump_opened_once) {
-		logdump_opened_once = true;
-		pr_info("logdump: 已打开落盘目标,偏移 %llu MB\n",
-			LOGDUMP_OFFSET >> 20);
+	total = logdump_collect();
+	if (total == 0) {
+		logdump_write_status(-ENODATA, 0);
+		goto out;
 	}
 
-	if (len > LOGDUMP_MAXLEN - sizeof(hdr))
-		len = LOGDUMP_MAXLEN - sizeof(hdr);
+	len = total > TAIL_LEN ? TAIL_LEN : total;
+	tail = logdump_buf + (total - len);
 
-	memcpy(hdr.magic, LOGDUMP_MAGIC, sizeof(hdr.magic));
+	memcpy(hdr.magic, MAGIC_LOG, 8);
 	hdr.seq = ++logdump_seq;
 	hdr.len = (u32)len;
 
-	ret = kernel_write(f, &hdr, sizeof(hdr), &pos);
-	if (ret == sizeof(hdr))
-		ret = kernel_write(f, data, len, &pos);
-
-	if (ret < 0)
-		pr_debug("logdump: 写入失败 %zd\n", ret);
-
-	/* 关键:必须落盘,否则硬复位时数据还在 page cache 里 */
-	vfs_fsync(f, 1);
-	filp_close(f, NULL);
-}
-
-/*
- * 状态记录:写在日志区之后 3MB 处(即偏移 131MB)。
- * 万一日志没写成功,这里能留下原因,下次不用再猜。
- * 格式:"KLOGSTAT" + seq(4) + errcode(4) + len(4)
- */
-#define LOGDUMP_STAT_OFFSET  (LOGDUMP_OFFSET + 3ULL * 1024 * 1024)
-
-static void logdump_write_status(int errcode, size_t len)
-{
-	struct file *f;
-	char rec[24];
-	loff_t pos = LOGDUMP_STAT_OFFSET;
-	int n;
-
-	memcpy(rec, "KLOGSTAT", 8);
-	memcpy(rec + 8, &logdump_seq, 4);
-	memcpy(rec + 12, &errcode, 4);
-	{
-		u32 l32 = (u32)len;
-		memcpy(rec + 16, &l32, 4);
+	bdev = logdump_get_bdev();
+	if (!bdev) {
+		logdump_write_status(-ENODEV, len);
+		goto out;
 	}
 
-	f = filp_open(LOGDUMP_PATH_BYNAME, O_WRONLY | O_LARGEFILE, 0);
-	if (IS_ERR(f))
-		f = filp_open(LOGDUMP_PATH_RAW, O_WRONLY | O_LARGEFILE, 0);
-	if (IS_ERR(f))
-		return;   /* 连状态都写不了,只能放弃 */
+	ret = logdump_write_at(bdev, LOG_OFFSET, &hdr, sizeof(hdr));
+	if (ret == 0)
+		ret = logdump_write_at(bdev, LOG_OFFSET + sizeof(hdr), tail, len);
+	blkdev_put(bdev, FMODE_READ | FMODE_WRITE);
 
-	n = kernel_write(f, rec, 20, &pos);
-	(void)n;
-	vfs_fsync(f, 1);
-	filp_close(f, NULL);
-}
+	if (ret)
+		pr_err("logdump: 写日志失败 %d\n", ret);
 
-static void logdump_dump(struct kmsg_dumper *dumper,
-			 enum kmsg_dump_reason reason)
-{
-	size_t len = logdump_collect();
-
-	if (len)
-		logdump_write_to_disk(logdump_buf, len);
-}
-
-/*
- * 注意:v1 用 kmsg_dump() 触发,结果什么都没写出来 ——
- * kmsg_dump() 是给 panic/oops 用的,从 workqueue 调用会被静默忽略。
- * 正确做法:kmsg_dump_rewind() 重置游标,然后直接收集。
- */
-static void logdump_work_fn(struct work_struct *w)
-{
-	size_t len;
-
-	kmsg_dump_rewind(&logdump_dumper);
-	len = logdump_collect();
-
-	if (len) {
-		logdump_write_to_disk(logdump_buf, len);
-		logdump_write_status(0, len);
-	} else {
-		logdump_write_status(-ENODATA, 0);
-	}
-
+out:
 	queue_delayed_work(system_wq, &logdump_work,
-			   msecs_to_jiffies(LOGDUMP_PERIOD_MS));
+			   msecs_to_jiffies(PERIOD_MS));
 }
 
 static int __init logdump_init(void)
 {
-	logdump_buf = vmalloc(LOGDUMP_MAXLEN);
+	logdump_buf = vmalloc(4U * 1024 * 1024);
 	if (!logdump_buf) {
-		pr_err("logdump: 分配缓冲区失败\n");
+		pr_err("logdump: 缓冲区分配失败\n");
 		return -ENOMEM;
 	}
 
-	logdump_dumper.dump = logdump_dump;
-	if (kmsg_dump_register(&logdump_dumper)) {
-		pr_err("logdump: 注册 dumper 失败\n");
-		vfree(logdump_buf);
-		logdump_buf = NULL;
-		return -EBUSY;
-	}
+	if (kmsg_dump_register(&logdump_dumper))
+		pr_err("logdump: kmsg_dump_register 失败(不致命)\n");
 
 	INIT_DELAYED_WORK(&logdump_work, logdump_work_fn);
-	/* 等根文件系统/ueventd 起来一点再开始 */
-	queue_delayed_work(system_wq, &logdump_work, msecs_to_jiffies(3000));
+	queue_delayed_work(system_wq, &logdump_work, msecs_to_jiffies(5000));
 
-	pr_info("logdump: 已启用(每 %d ms 写一次)\n", LOGDUMP_PERIOD_MS);
+	pr_info("logdump: v3 已启用 目标 %s 偏移 %lluMB 周期 %dms\n",
+		TARGET_DISK, LOG_OFFSET >> 20, PERIOD_MS);
 	return 0;
 }
 
 late_initcall(logdump_init);
 
-MODULE_DESCRIPTION("periodic kernel log dumper for hard-reset debugging");
+MODULE_DESCRIPTION("periodic kernel log dumper (v3, bdev by devt)");
 MODULE_LICENSE("GPL v2");
