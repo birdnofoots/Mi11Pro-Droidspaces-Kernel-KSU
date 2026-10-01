@@ -7,7 +7,7 @@
  *      所以崩溃前最后一次写入必然已经在盘上。
  *
  * 目标(经实测选定):
- *   /dev/block/by-name/boot_b  偏移 logdump 分区(sde59,64MB)起始处,上限 4MB
+ *   /dev/block/by-name/boot_b  偏移 128MB,上限 4MB
  * 依据:原厂 boot 镜像真实内容只到约 72MB,之后到 192MB 全是零填充,
  *      写 128MB 处不影响镜像,ABL 只读 header 描述的范围。
  *
@@ -20,6 +20,8 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/workqueue.h>
+#include <linux/blkdev.h>
+#include <linux/buffer_head.h>
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/delay.h>
@@ -31,7 +33,7 @@
 
 #define LOGDUMP_PATH_BYNAME  "/dev/block/by-name/boot_b"
 #define LOGDUMP_PATH_RAW     "/dev/block/sde59"      /* mars: boot_b 的实际节点 */
-#define LOGDUMP_OFFSET       (0ULL)   /* logdump 分区(sde59,64MB)起始处 */
+#define LOGDUMP_OFFSET       (0ULL)
 #define LOGDUMP_MAXLEN       (4U * 1024 * 1024)      /* 4MB 上限 */
 #define LOGDUMP_PERIOD_MS    2000
 #define LOGDUMP_MAGIC        "KLOGDMP1"
@@ -84,6 +86,31 @@ static size_t logdump_collect(void)
 /*
  * 真正落盘。在 workqueue 上下文执行(可以睡眠)。
  */
+
+/* 兜底:内核线程打不开 /dev 节点,用 devt 查询 + buffer head 直写 */
+static int logdump_write_raw(loff_t offset, const void *data, size_t len)
+{
+	dev_t devt = blk_lookup_devt("sde", 59);
+	struct block_device *bdev;
+	size_t done = 0;
+
+	if (!devt) return -ENODEV;
+	bdev = blkdev_get_by_dev(devt, FMODE_READ | FMODE_WRITE, NULL);
+	if (IS_ERR(bdev)) return PTR_ERR(bdev);
+	while (done < len) {
+		sector_t sec = (offset + done) >> 9;
+		size_t off = (offset + done) & 511;
+		size_t n = min_t(size_t, len - done, 512 - off);
+		struct buffer_head *bh = __getblk(bdev, sec, 512);
+		if (!bh) break;
+		memcpy(bh->b_data + off, (const char *)data + done, n);
+		mark_buffer_dirty(bh); sync_dirty_buffer(bh); brelse(bh);
+		done += n;
+	}
+	blkdev_put(bdev, FMODE_READ | FMODE_WRITE);
+	return done == len ? 0 : -EIO;
+}
+
 static void logdump_write_to_disk(const char *data, size_t len)
 {
 	struct file *f;
@@ -99,7 +126,20 @@ static void logdump_write_to_disk(const char *data, size_t len)
 	if (IS_ERR(f)) {
 		f = filp_open(LOGDUMP_PATH_RAW, O_WRONLY | O_LARGEFILE, 0);
 		if (IS_ERR(f)) {
-			pr_debug("logdump: 打不开目标设备,稍后重试\n");
+			/* ★ 内核线程打不开 /dev 节点(ueventd 才创建)⇒ 改用 devt 直写 */
+			if (len > LOGDUMP_MAXLEN - sizeof(hdr))
+				len = LOGDUMP_MAXLEN - sizeof(hdr);
+			memcpy(hdr.magic, LOGDUMP_MAGIC, sizeof(hdr.magic));
+			hdr.seq = ++logdump_seq;
+			hdr.len = (u32)len;
+			if (!logdump_write_raw(LOGDUMP_OFFSET,
+					       &hdr, sizeof(hdr)))
+				logdump_write_raw(LOGDUMP_OFFSET + sizeof(hdr),
+						  data, len);
+			if (!logdump_opened_once) {
+				logdump_opened_once = true;
+				pr_info("logdump: 已改用 devt 直写 sde59\n");
+			}
 			return;
 		}
 	}
