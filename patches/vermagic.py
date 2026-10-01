@@ -1,54 +1,49 @@
 #!/usr/bin/env python3
-"""让自编内核的 vermagic 与原厂一致 —— 这是「原厂 .ko 能装进来」的最后一块拼图。
+"""把自编内核的 VERMAGIC_STRING 硬编码成【原厂模块期望的那个字符串】。
 
-★ 目标
-  现在原厂 vendor 模块一个都装不进我们的内核,日志里全是
-    "<module>: disagrees about version of symbol module_layout"
-  两道闸:
-    (1) vermagic 字符串必须逐字节相同;
-    (2) 每个符号的 CRC 必须相同(Modversions)。
-  原厂模块的 vermagic(TAKEOVER.md §36 抓到的)是:
-    "5.4.233-qgki SMP preempt mod_unload modversions aarch64"
-  我们的内核除了 "modversions" 这一节以外都一样(UTS_RELEASE=5.4.233-qgki ✓、
-  SMP=y ✓、PREEMPT=y ✓、MODULE_UNLOAD=y ✓、aarch64 ✓)。
+★ 铁证(2026-10-02,来自我们内核那轮启动日志 sda59):
+    qmi_helpers: version magic
+      '5.4.233-gbb70cde46897 SMP preempt mod_unload modversions aarch64'
+      should be
+      '5.4.233-qgki SMP preempt mod_unload modversions aarch64'
+    hwid: version magic '5.4.233-qgki-gbb70cde46897 ...' should be '5.4.233-qgki ...'
+    rmnet_ctl: 同上
+  ⇒ 原厂 .ko 全部因为 vermagic 不一致被拒收。
+    (注意:TAKEOVER.md §36 里记的"原厂模块 vermagic 是 -qgki"是【错的】;
+     实测原厂模块要的是 5.4.233-gbb70cde46897,而 -qgki 是我们自己的。)
 
-★ 做法
-  1) 配置里关掉 CONFIG_MODVERSIONS ⇒ 内核【编译掉】符号 CRC 校验
-     (kernel/module.c 里 check_version() 整段是 #ifdef CONFIG_MODVERSIONS)。
-     于是闸门 (2) 直接消失 —— 原厂模块的 __versions 段会被忽略。
-     这一步不用改源码:见 CI 里写 star_droidspaces.config 的地方 / patches/m2y.py。
-  2) 但模块自己的 vermagic 里带 "modversions " ⇒ 内核这边也必须带,
-     否则 loader 连门都不让进。本补丁就是把 MODULE_VERMAGIC_MODVERSIONS
-     从"跟着 CONFIG_MODVERSIONS 走"改成【无条件带 "modversions "】。
+★ 配套(缺一不可):
+  1) 配置里关掉 CONFIG_MODVERSIONS ⇒ 内核编译掉符号 CRC 校验(check_version());
+  2) 本补丁把 VERMAGIC_STRING 写死成原厂那串 ⇒ 通过 vermagic 检查;
+  3) 原厂配置里没有 CONFIG_MODULE_SIG* ⇒ 没有签名校验。
+  ⇒ 原厂 vendor 模块(wlan/qti_battery_charger_main/音频 codec/相机/触摸…)
+    就能加载进自编内核 —— 这是"让手机真正可用"的关键一步。
 
-★ 附带前提(已核对)
-  * 原厂配置里【没有】CONFIG_MODULE_SIG* ⇒ 没有签名校验 ⇒ 原厂未签名/异签模块不会被拒。
-  * 我们 Kconfig 里 MODULE_UNLOAD / PREEMPT / SMP 与原厂一致(已逐项 diff)。
+★ 这只影响模块校验串,不影响 `uname -r`(那个来自 UTS_RELEASE)。
 """
 import sys
 
 P = 'include/linux/vermagic.h'
-OLD = '''#ifdef CONFIG_MODVERSIONS
-#define MODULE_VERMAGIC_MODVERSIONS "modversions "
-#else
-#define MODULE_VERMAGIC_MODVERSIONS ""
-#endif'''
+STOCK = '5.4.233-gbb70cde46897 SMP preempt mod_unload modversions aarch64'
+BLOCK = (
+    '\n/*\n'
+    ' * ★ mars 补丁:见 patches/vermagic.py 顶部注释。\n'
+    ' *   把模块校验串硬编码成原厂模块期望的值(实测),否则原厂 .ko 全部被拒收。\n'
+    ' */\n'
+    '#undef VERMAGIC_STRING\n'
+    '#define VERMAGIC_STRING "%s"\n' % STOCK
+)
 
-NEW = '''/*
- * ★ mars 补丁:无条件带 "modversions " 字样。
- *   我们故意用 CONFIG_MODVERSIONS=n 来跳过符号 CRC 校验(原厂 .ko 的 CRC 与
- *   我们的内核只有 37% 匹配,校验一开它们就全装不进来),但原厂模块的 vermagic
- *   里带 "modversions " ⇒ 内核这边也必须带同样的字样,否则 loader 直接拒收。
- *   详见 patches/vermagic.py。
- */
-#define MODULE_VERMAGIC_MODVERSIONS "modversions "'''
+try:
+    s = open(P).read()
+except OSError:
+    print('  [失败] 找不到 %s' % P)
+    sys.exit(1)
 
-s = open(P).read()
-if NEW in s:
+if STOCK in s and 'mars 补丁' in s:
     print('  [跳过] vermagic 补丁已存在')
     sys.exit(0)
-if OLD not in s:
-    print('  [失败] %s 里找不到锚点' % P)
-    sys.exit(1)
-open(P, 'w').write(s.replace(OLD, NEW, 1))
-print('  [ok] %s: MODULE_VERMAGIC_MODVERSIONS 无条件为 "modversions "' % P)
+
+open(P, 'a').write(BLOCK)
+print('  [ok] %s: VERMAGIC_STRING 硬编码为原厂串' % P)
+print('       %s' % STOCK)
