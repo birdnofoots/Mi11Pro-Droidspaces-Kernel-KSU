@@ -206,9 +206,27 @@ static void logdump_dump(struct kmsg_dumper *dumper,
 			 enum kmsg_dump_reason reason)
 {
 	size_t len = logdump_collect();
+	struct logdump_hdr hdr;
 
-	if (len)
-		logdump_write_to_disk(logdump_buf, len);
+	if (!len)
+		return;
+
+	memcpy(hdr.magic, LOGDUMP_MAGIC, sizeof(hdr.magic));
+	hdr.seq = ++logdump_seq;
+	hdr.len = (u32)len;
+
+	/*
+	 * ★★ 关键:kmsg_dump_get_buffer() 只在【dump 回调上下文】有效,
+	 *   从 workqueue 调用必定返回 0(这就是之前 sde59 全零的原因)。
+	 *   所以必须在这里【直接落盘】—— 原厂 mtdoops 也是这个结构。
+	 *   本设备失败时是「黑屏后有序重启」⇒ RESTART 回调会触发 ✓
+	 */
+	if (!logdump_write_raw(LOGDUMP_OFFSET, &hdr, sizeof(hdr)))
+		logdump_write_raw(LOGDUMP_OFFSET + sizeof(hdr),
+				  logdump_buf, len);
+
+	/* 再试一次常规路径(成功就是双保险,失败也无害) */
+	logdump_write_to_disk(logdump_buf, len);
 }
 
 /*
