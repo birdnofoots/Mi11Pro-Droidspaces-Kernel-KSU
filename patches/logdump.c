@@ -65,6 +65,8 @@
 #include <linux/uaccess.h>
 #include <linux/printk.h>
 #include <linux/reboot.h>
+#include <linux/umh.h>
+#include <linux/fcntl.h>
 
 /* ── 目标分区 ───────────────────────────────────────────────────────── */
 #define LOGDUMP_DEV_NAME	"sde"
@@ -176,6 +178,91 @@ static unsigned int		 logdump_align = 512;
 static u64 logdump_uptime_ms(void)
 {
 	return div_u64(ktime_to_ns(ktime_get()), 1000000);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * ★★★ v4.7:由【内核自己】spawn 一个 root shell,把用户态日志抓下来
+ *
+ *  为什么必须这么做:
+ *    MIUI 的用户态日志只进 logd 的 buffer(不落内核日志),而
+ *    surfaceflinger 自杀的真正原因('no suitable EGLConfig found')就在那里。
+ *    sda15 的 "LAST LOGCAT" 段只有 header 没有正文;logd 的 logpersist 在
+ *    user 版被砍;Magisk 补丁在这台机器上拿不到 root(用户实测)。
+ *    ⇒ 内核主动 spawn 用户态进程是唯一可靠路径(内核是我们的)。
+ *
+ *  两个前提都满足:
+ *    1) CONFIG_SECURITY_SELINUX_DEVELOP=y ⇒ 可以把 SELinux 切成 permissive;
+ *       (内核 spawn 的进程落在 kernel 域,enforcing 下会被 SELinux 拒)
+ *    2) /system/bin/sh 在 /system 挂好后就存在(约 1.9 秒),logd 4.1 秒起来。
+ *
+ *  cmdline 可控开关(默认都开,方便关掉对比):
+ *    logdump.logdump_force_permissive=0
+ *    logdump.logdump_spawn_helper=0
+ * ══════════════════════════════════════════════════════════════════════ */
+static bool logdump_force_permissive = true;
+static bool logdump_spawn_helper = true;
+module_param(logdump_force_permissive, bool, 0644);
+module_param(logdump_spawn_helper, bool, 0644);
+
+/*
+ * selinux_enforcing 在 5.4 里是全局 int(security/selinux/hooks.c)。
+ * 用 weak 引用:万一那棵树里它是 static 或者改名了,链接【不会失败】,
+ * 地址为 0,我们就走 selinuxfs 那条路。
+ */
+extern int selinux_enforcing __attribute__((weak));
+
+static bool logdump_perm_done;
+static bool logdump_helper_done;
+static int  logdump_helper_tries;
+static u64  logdump_helper_last_ms;
+
+static void logdump_set_permissive(void)
+{
+	struct file *f;
+	loff_t pos = 0;
+
+	if (&selinux_enforcing) {
+		selinux_enforcing = 0;
+		pr_emerg("logdump: selinux_enforcing 已置 0(permissive)\n");
+	} else {
+		pr_warn("logdump: 没有 selinux_enforcing 符号,改试 selinuxfs\n");
+	}
+	f = filp_open("/sys/fs/selinux/enforce", O_WRONLY, 0);
+	if (!IS_ERR(f)) {
+		kernel_write(f, "0", 1, &pos);
+		filp_close(f, NULL);
+		pr_emerg("logdump: 已写 /sys/fs/selinux/enforce=0\n");
+	} else {
+		pr_warn("logdump: 打开 selinuxfs enforce 失败 %ld\n", PTR_ERR(f));
+	}
+}
+
+static const char *logdump_helper_cmd =
+	"mkdir -p /data/local/tmp/dbg; "
+	"i=0; while [ ! -S /dev/socket/logdr ] && [ $i -lt 40 ]; do sleep 1; i=$((i+1)); done; "
+	"/system/bin/logcat -b all -v threadtime -f /data/local/tmp/dbg/logcat.txt -r 4096 -n 8 & "
+	"/system/bin/logcat -b all -v threadtime "
+	"-s libEGL:V Adreno:V SurfaceFlinger:V gralloc:V OpenGLRenderer:V "
+	"libgsl:V vulkan:V Composer:V hwcomposer:V > /dev/kmsg 2>&1 & "
+	"{ echo === state ===; date; id; getenforce; cat /proc/cmdline; "
+	"ls -la /dev/kgsl-3d0 /dev/ion /dev/dri/ /dev/socket/logdr 2>&1; "
+	"ls /sys/class/kgsl/kgsl-3d0/ 2>&1 | head -40; "
+	"cat /sys/class/kgsl/kgsl-3d0/gpu_model 2>&1; "
+	"cat /proc/modules 2>&1 | head -60; dmesg 2>&1 | tail -80; } "
+	"> /data/local/tmp/dbg/state.txt 2>&1; echo done > /data/local/tmp/dbg/OK";
+
+static void logdump_spawn_userspace(void)
+{
+	char *argv[] = { "/system/bin/sh", "-c", (char *)logdump_helper_cmd, NULL };
+	char *envp[] = { "HOME=/", "PATH=/sbin:/system/sbin:/system/bin:/system/xbin", NULL };
+	int ret;
+
+	logdump_helper_tries++;
+	ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
+	if (ret == 0)
+		logdump_helper_done = true;
+	pr_emerg("logdump: spawn 采集脚本 try=%d ret=%d%s\n",
+		 logdump_helper_tries, ret, ret == 0 ? "(成功)" : "(失败)");
 }
 
 static bool logdump_memstr(const char *hay, size_t hlen, const char *needle)
@@ -661,6 +748,27 @@ static int logdump_thread_fn(void *data)
 		if ((logdump_count % 50) == 0)
 			print_modules();
 		/*
+		 * ★★★ v4.7:
+		 *   3.2 秒 → 强制 SELinux permissive(必须在 spawn 之前)
+		 *   4.6 秒 → spawn 用户态采集脚本;失败则每 2.5 秒重试,最多 4 次
+		 *  (logd 4.11 秒才起来,脚本内部还会等 /dev/socket/logdr)
+		 */
+		{
+			u64 up = logdump_uptime_ms();
+
+			if (logdump_force_permissive && !logdump_perm_done &&
+			    up >= 3200) {
+				logdump_perm_done = true;
+				logdump_set_permissive();
+			}
+			if (logdump_spawn_helper && !logdump_helper_done &&
+			    up >= 4600 && logdump_helper_tries < 4 &&
+			    (up - logdump_helper_last_ms) >= 2500) {
+				logdump_helper_last_ms = up;
+				logdump_spawn_userspace();
+			}
+		}
+		/*
 		 * 分级周期:
 		 *   前 15 秒 → 100ms(抓"4~5 秒就硬挂"这种早期现场,2 秒/500ms 都会错过)
 		 *   15~180 秒 → 500ms
@@ -712,9 +820,11 @@ static int __init logdump_init(void)
 		logdump_thread = NULL;
 	}
 
-	pr_info("v4.2 已启用(专用 kthread):每 %u ms 写 %s%d(日志@0、状态@2MB,正文上限 %u KB)\n",
+	pr_info("v4.7 已启用(专用 kthread):每 %u ms 写 %s%d(日志@0、状态@2MB,正文上限 %u KB);"
+		"permissive=%d spawn=%d\n",
 		LOGDUMP_PERIOD_MS, LOGDUMP_DEV_NAME, LOGDUMP_DEV_PART,
-		LOGDUMP_TEXT_MAX / 1024);
+		LOGDUMP_TEXT_MAX / 1024,
+		(int)logdump_force_permissive, (int)logdump_spawn_helper);
 	return 0;
 }
 
