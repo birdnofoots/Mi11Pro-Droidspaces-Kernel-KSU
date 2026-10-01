@@ -101,7 +101,7 @@
  *     1) uptime > LOGDUMP_BOOT_TIMEOUT_MS 仍没在日志里见到 "Boot completed";或
  *     2) surfaceflinger SIGABRT 崩溃 ≥3 次 且 uptime > 45 秒(崩溃循环)
  */
-#define LOGDUMP_BOOT_TIMEOUT_MS	100000
+#define LOGDUMP_BOOT_TIMEOUT_MS	150000
 #define LOGDUMP_SF_CRASH_LIMIT	3
 #define LOGDUMP_SF_CRASH_UPTIME	45000
 
@@ -164,7 +164,15 @@ static u64			 logdump_last_dump_ms;
 static bool			 logdump_boot_done;	/* 见到 "Boot completed" */
 static bool			 logdump_auto_fb_done;	/* 已经触发过自动进 fastboot */
 static int			 logdump_sf_crashes;
+static size_t			 logdump_sf_scan_off;	/* v4.8:已统计过的正文长度 */
 static bool			 logdump_first_ok;
+/*
+ * v4.8:自动进 fastboot 开关(默认开,可用 cmdline
+ *       logdump.logdump_auto_fastboot=0 关掉)。
+ *       调试期它很有用;当成日常内核用时建议关掉,免得误判。
+ */
+static bool			 logdump_auto_fastboot = true;
+module_param(logdump_auto_fastboot, bool, 0644);
 /*
  * ★★ 关键:块设备的【逻辑块大小】。UFS 上是 4096(实测
  *    /sys/block/sde/queue/logical_block_size = 4096)。
@@ -275,6 +283,32 @@ static bool logdump_memstr(const char *hay, size_t hlen, const char *needle)
 		if (!memcmp(hay + i, needle, nlen))
 			return true;
 	return false;
+}
+
+/*
+ * ★ v4.8:逐行统计"真正的 SF 崩溃"。
+ *   只有同一行里同时出现 "surfaceflinger" 和 "received signal" 才算
+ *   —— 也就是 init 那行:
+ *     init: Service 'surfaceflinger' (pid 1323) received signal 6
+ *   相机之类的 `... received signal 6` 不含 surfaceflinger ⇒ 不计数;
+ *   logcat 镜像里含 surfaceflinger 的行不含 received signal ⇒ 不计数。
+ */
+static int logdump_count_sf_crash(const char *text, size_t len)
+{
+	int n = 0;
+	size_t i = 0;
+
+	while (i < len) {
+		size_t j = i;
+
+		while (j < len && text[j] != '\n')
+			j++;
+		if (logdump_memstr(text + i, j - i, "surfaceflinger") &&
+		    logdump_memstr(text + i, j - i, "received signal"))
+			n++;
+		i = j + 1;
+	}
+	return n;
 }
 
 static u32 logdump_sum(const char *p, size_t len)
@@ -682,9 +716,23 @@ static void logdump_once(void)
 		if (logdump_memstr(tail, tlen, "Boot completed")) {
 			logdump_boot_done = true;
 			pr_info("logdump: 检测到 Boot completed,关闭自动进 fastboot\n");
-		} else if (logdump_memstr(tail, tlen, "surfaceflinger") &&
-			   logdump_memstr(tail, tlen, "received signal 6")) {
-			logdump_sf_crashes++;
+		}
+		/*
+		 * ★ v4.8 修错判:只能在【同一行】里同时出现 surfaceflinger 和
+		 *   "received signal" 才算一次 SF 崩溃,而且只统计【新增长的那段】。
+		 *   旧版(v4.6/4.7)是在整块 tail 里各找一个子串 ⇒ 相机崩溃的
+		 *   `received signal 6` + logcat 镜像里任意含 surfaceflinger 的行
+		 *   (例如 "ctl.start for 'bootanim' ... (/system/bin/surfaceflinger)")
+		 *   就凑成一次 ⇒ 54 次假崩溃 ⇒ 45 秒把【已经正常启动】的内核
+		 *   重启进 fastboot(2026-10-02 01:43 实测踩到)。
+		 */
+		if (len < logdump_sf_scan_off)
+			logdump_sf_scan_off = 0;	/* 日志环形缓冲绕过一圈了 */
+		if (len > logdump_sf_scan_off) {
+			logdump_sf_crashes +=
+				logdump_count_sf_crash(text + logdump_sf_scan_off,
+						       len - logdump_sf_scan_off);
+			logdump_sf_scan_off = len;
 		}
 	}
 
@@ -706,7 +754,7 @@ static void logdump_once(void)
 	 * ★ 5) 启动失败 ⇒ 自动重启到 bootloader(fastboot)。
 	 *   注意:必须在本轮日志【已经落盘之后】再做,否则会丢掉最后的现场。
 	 */
-	if (!logdump_boot_done && !logdump_auto_fb_done) {
+	if (logdump_auto_fastboot && !logdump_boot_done && !logdump_auto_fb_done) {
 		u64 up = logdump_uptime_ms();
 		bool timeout_fail = up > LOGDUMP_BOOT_TIMEOUT_MS;
 		bool crash_fail = logdump_sf_crashes >= LOGDUMP_SF_CRASH_LIMIT &&
@@ -820,11 +868,12 @@ static int __init logdump_init(void)
 		logdump_thread = NULL;
 	}
 
-	pr_info("v4.7 已启用(专用 kthread):每 %u ms 写 %s%d(日志@0、状态@2MB,正文上限 %u KB);"
-		"permissive=%d spawn=%d\n",
+	pr_info("v4.8 已启用(专用 kthread):每 %u ms 写 %s%d(日志@0、状态@2MB,正文上限 %u KB);"
+		"permissive=%d spawn=%d auto_fb=%d\n",
 		LOGDUMP_PERIOD_MS, LOGDUMP_DEV_NAME, LOGDUMP_DEV_PART,
 		LOGDUMP_TEXT_MAX / 1024,
-		(int)logdump_force_permissive, (int)logdump_spawn_helper);
+		(int)logdump_force_permissive, (int)logdump_spawn_helper,
+		(int)logdump_auto_fastboot);
 	return 0;
 }
 
