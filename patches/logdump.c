@@ -46,6 +46,7 @@
 #include <linux/workqueue.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
+#include <linux/sched/debug.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
 #include <linux/blkdev.h>
@@ -138,6 +139,11 @@ static u32			 logdump_snap_reason;
 static u32			 logdump_seq;
 static u32			 logdump_count;
 static struct task_struct	*logdump_thread;
+/* 用于"日志停涨 ⇒ Dump 所有任务状态"的判据 */
+static size_t			 logdump_prev_len;
+static size_t			 logdump_prev2_len;
+static u64			 logdump_len_same_since_ms;
+static u64			 logdump_last_dump_ms;
 static bool			 logdump_first_ok;
 /*
  * ★★ 关键:块设备的【逻辑块大小】。UFS 上是 4096(实测
@@ -476,6 +482,34 @@ static void logdump_dump_work_fn(struct work_struct *w)
 	mutex_unlock(&logdump_mutex);
 }
 
+/*
+ * ★★★ 日志停涨检测 —— 我们遇到的是"内核硬挂、日志戛然而止"。
+ *   如果内核其实还活着(只是某个任务卡死/拿不到锁),那么把【所有任务的状态和栈】
+ *   打进内核日志,下一轮采集就会一起落盘 ⇒ 直接看到是谁卡在哪里。
+ *   实测 2026-10-02:换成内建 GPU 固件后,内核算到 4.3~4.4 秒就再没有任何输出。
+ */
+static void logdump_check_stuck(void)
+{
+	u64 now = logdump_uptime_ms();
+
+	if (logdump_prev_len != logdump_prev2_len) {
+		/* 还在长 ⇒ 正常 */
+		logdump_len_same_since_ms = now;
+		return;
+	}
+	if (now < 3000 || !logdump_len_same_since_ms)
+		return;
+	if (now - logdump_len_same_since_ms < 1500)
+		return;
+	if (now - logdump_last_dump_ms < 2000)
+		return;
+
+	logdump_last_dump_ms = now;
+	pr_emerg("logdump: 日志已 %llums 无增长(len=%zu, uptime=%llums)⇒ Dump 全部任务状态\n",
+		 now - logdump_len_same_since_ms, logdump_prev_len, now);
+	show_state_filter(0);
+}
+
 static void logdump_once(void)
 {
 	char *text = logdump_buf ? logdump_buf + LOGDUMP_OFF_TEXT : NULL;
@@ -493,6 +527,9 @@ static void logdump_once(void)
 
 	count = ++logdump_count;
 	seq = ++logdump_seq;
+
+	/* 0) 日志停涨(疑似卡死)⇒ 先把所有任务状态打进日志,本轮的采集就会带上它 */
+	logdump_check_stuck();
 
 	/* 1) 先把上一轮崩溃回调留下的快照落盘(那才是真正的现场) */
 	logdump_flush_snapshot();
@@ -527,6 +564,10 @@ static void logdump_once(void)
 	logdump_write_status(count, seq, ret, len, source, 0,
 			     ret ? "log-fail" : "ok");
 
+	/* 记录本轮长度,供下一轮判断"日志是否停涨" */
+	logdump_prev2_len = logdump_prev_len;
+	logdump_prev_len = len;
+
 	mutex_unlock(&logdump_mutex);
 }
 
@@ -546,10 +587,16 @@ static int logdump_thread_fn(void *data)
 			pr_info("logdump: 心跳 #%u uptime=%llums\n",
 				logdump_count, logdump_uptime_ms());
 		/*
-		 * 前 3 分钟密写(500ms,抓启动/挂死现场);之后降到 10 秒一次,
-		 * 避免系统正常长时间运行时一直以 ~1MB/s 写 UFS 磨损闪存。
+		 * 分级周期:
+		 *   前 15 秒 → 100ms(抓"4~5 秒就硬挂"这种早期现场,2 秒/500ms 都会错过)
+		 *   15~180 秒 → 500ms
+		 *   之后 → 10 秒(避免正常长时间运行时一直密写 UFS 磨损闪存)
 		 */
-		msleep(logdump_uptime_ms() < 180000 ? LOGDUMP_PERIOD_MS : 10000);
+		{
+			u64 up = logdump_uptime_ms();
+			msleep(up < 15000 ? 100 :
+			       (up < 180000 ? LOGDUMP_PERIOD_MS : 10000));
+		}
 	}
 	return 0;
 }
