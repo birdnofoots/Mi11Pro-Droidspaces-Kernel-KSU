@@ -386,6 +386,21 @@ jobs:
         continue-on-error: true
         run: |
           cd kernel
+          # ★★ 这段手术【只对旧树(EcrosoftXiao/mars)有意义】,对 star 树有害:
+          #   star 的 techpack/display/msm/Makefile 里有【多条】
+          #     msm_drm-$(CONFIG_DRM_MSM) += ...
+          #   第 128 行是显示核心(dsi/sde/...),第 142 行起是 mi_disp/*.o。
+          #   旧 sed 把它们统统改成 `msm_drm-y :=` —— 而 `:=` 是【立即赋值、
+          #   后者覆盖前者】⇒ 第 142 行把第 128 行的核心全盖掉 ⇒
+          #   mi_disp 编进来了、dsi/sde 核心没编 ⇒ vmlinux 链接报 20 个
+          #   undefined(dsi_display_* / sde_* / mi_dsi_* 互引)。
+          #   star 树由 QGKI 片段链正常开启 CONFIG_DRM_MSM,根本不需要动 Makefile。
+          if [ -f arch/arm64/configs/vendor/star_QGKI.config ]; then
+            echo "star(QGKI 片段链)树:跳过 Makefile 手术(会覆盖显示核心列表)"
+            echo -n "  该 Makefile 里 msm_drm-\$(CONFIG_DRM_MSM) += 的行数: "
+            grep -c 'msm_drm-\$(CONFIG_DRM_MSM) +=' techpack/display/msm/Makefile || true
+            exit 0
+          fi
           sed -i 's|^msm_drm-$(CONFIG_DRM_MSM) +=|msm_drm-y :=|' techpack/display/msm/Makefile
           sed -i 's|^obj-$(CONFIG_DISPLAY_BUILD)	+= msm_drm.o|obj-y	+= msm_drm.o|' techpack/display/msm/Makefile
           echo "=== 修改后 techpack Makefile 关键行 ==="
