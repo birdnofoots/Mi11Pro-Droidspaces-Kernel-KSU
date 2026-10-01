@@ -98,6 +98,10 @@ jobs:
               #   不依赖 init / SELinux / 用户态 —— 硬复位前最后一次写入已在盘上。
               #   读回见 TAKEOVER.md 第 15 节。
               "qgki-logk":        {"defconfig": "vendor/mars_qgki_ds_defconfig",      "lto": "keep", "ksu": "0", "kabi": "0", "desc": "qgki + logdump(内核日志落到 boot_b 尾部)"},
+              # ★★ 用小米官方 star/mars 树(hmhmdcy/Mi11Pro-Droidspaces-Kernel)+ 作者自己的
+              #    Droidspaces 片段,走官方 QGKI 片段链构建(不是单个 defconfig)
+              "star-ds":          {"defconfig": "(QGKI 片段链)",                      "lto": "keep", "ksu": "0", "kabi": "0", "desc": "官方 star 树 + QGKI 片段链 + star_droidspaces.config"},
+              "star-ds-ksu":      {"defconfig": "(QGKI 片段链)",                      "lto": "keep", "ksu": "1", "kabi": "0", "desc": "同上 + 内建 KernelSU(刷完即 root)"},
               # ★ 诊断:把 panic 时的内核日志写进 boot_a 分区,重启后可以 dd 读出来。
               #   配合 cmdline 里的 androidboot.init_fatal_panic=1,
               #   让 init 的致命失败变成内核 panic → pstore/blk 落盘。
@@ -469,14 +473,30 @@ jobs:
           set -euo pipefail
           cd kernel
           V="${{ matrix.variant }}"
-          case "$V" in
-            control) DEF=vendor/mars_stock_defconfig ;;
-            *)       DEF="${{ matrix.defconfig }}" ;;
-          esac
-          mkdir -p arch/arm64/configs/vendor
-          cp "../configs/$(basename "$DEF")" "arch/arm64/configs/$DEF"
-          [ "$V" = "allbuiltin-ksu" ] && echo 'CONFIG_KSU=y' >> "arch/arm64/configs/$DEF"
-          make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} "$DEF"
+          if [ -f arch/arm64/configs/vendor/star_droidspaces.config ]; then
+            # ★ QGKI 片段链树(小米官方 star/mars 源码 + Droidspaces 片段)
+            #   参考 scripts/gki/generate_defconfig.sh:
+            #   base_defconfig -> GKI -> QGKI -> consolidate -> (我们的)droidspaces
+            S=arch/arm64/configs
+            echo "=== [QGKI 流程] 基础 defconfig ==="
+            make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} gki_defconfig
+            FRAGS=""
+            for f in vendor/debugfs.config vendor/star_GKI.config vendor/star_QGKI.config \
+                     vendor/star_consolidate.config vendor/star_droidspaces.config; do
+              [ -f "$S/$f" ] && FRAGS="$FRAGS $S/$f"
+            done
+            echo "=== 合并片段:$FRAGS"
+            scripts/kconfig/merge_config.sh -O out -m out/.config $FRAGS
+          else
+            case "$V" in
+              control) DEF=vendor/mars_stock_defconfig ;;
+              *)       DEF="${{ matrix.defconfig }}" ;;
+            esac
+            mkdir -p arch/arm64/configs/vendor
+            cp "../configs/$(basename "$DEF")" "arch/arm64/configs/$DEF"
+            [ "$V" = "allbuiltin-ksu" ] && echo 'CONFIG_KSU=y' >> "arch/arm64/configs/$DEF"
+            make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} "$DEF"
+          fi
           if [ "${{ matrix.lto }}" = "none" ]; then
             scripts/config --file out/.config -d LTO_CLANG -d LTO_CLANG_THIN -e LTO_NONE
           fi
