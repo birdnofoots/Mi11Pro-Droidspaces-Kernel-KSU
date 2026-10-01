@@ -1,0 +1,6 @@
+1800c70dc03141d8d0c92b7497b60752  work/crashlog/backup/bootlog-v4-1.txt
+816c51ddc60622107befc72cc7356ed5  work/crashlog/backup/bootlog-v4-1.txt.gz
+3837d2ae39277bde4774ff9c8e3595c6  work/crashlog/backup/logdump-v4-1.bin
+48649c348ad8d22b0afd89e370a36e89  work/crashlog/backup/logdump-v4-1.bin.gz
+6497d044fa261788282ef1fb4f48173c  work/crashlog/backup/stock-dmesg.txt
+9baf669304c4a63555edad8a73697f23  work/crashlog/backup/stock-dmesg.txt.gz
