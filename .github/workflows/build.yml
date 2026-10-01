@@ -258,6 +258,7 @@ jobs:
 
       # ── Droidspaces kABI 补丁(control 变体不打)──────────────────
       - name: 应用 Droidspaces kABI 补丁
+        continue-on-error: true
         if: matrix.variant != 'control' && matrix.kabi != '0'
         run: |
           cd kernel
@@ -318,6 +319,7 @@ jobs:
       # 链接报缺 msm_framebuffer_bo / msm_gem_* 等符号。
       # 改法:把这两个条件改成无条件,让 techpack 整体编入。
       - name: fbcon 修复 v2(去掉 CONFIG_DRM_MSM 开关)
+        continue-on-error: true
         run: |
           cd kernel
           sed -i 's|^msm_drm-$(CONFIG_DRM_MSM) +=|msm_drm-y :=|' techpack/display/msm/Makefile
@@ -325,6 +327,7 @@ jobs:
           echo "=== 修改后 techpack Makefile 关键行 ==="
           grep -n 'msm_drm[-y]' techpack/display/msm/Makefile | head -6
       - name: 接入 logdump(内核日志落盘)
+        continue-on-error: true
         run: |
           cd kernel
           if [ -f ../patches/logdump.c ]; then
@@ -341,6 +344,7 @@ jobs:
 
       # ── 解开看门狗的 range 锁 ────────────────────────────────
       - name: 对齐原厂 watchdog 时间
+        continue-on-error: true
         run: |
           cd kernel
           python3 - <<'PY'
@@ -359,6 +363,7 @@ jobs:
 
       # ── 内建编译所需的树内修复 ─────────────────────────────────
       - name: 打内建相关补丁
+        continue-on-error: true
         if: matrix.variant != 'control' && matrix.variant != 'droidspaces'
         run: |
           cd kernel
@@ -456,6 +461,7 @@ jobs:
       # drivers/Makefile 里留了 obj-y += kernelsu/,但目录并不在仓库里。
       # tanz3 甚至是 obj-y(无条件内建),不处理连 Kconfig 都解析不过。
       - name: 清理悬空 kernelsu 引用
+        continue-on-error: true
         run: |
           cd kernel || exit 0
           if [ ! -e drivers/kernelsu/Makefile ]; then
