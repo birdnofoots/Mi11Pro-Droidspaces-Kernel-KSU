@@ -426,6 +426,26 @@ jobs:
             exit 1
           fi
 
+      # ── MIUI 私有符号桩:让原厂 vendor .ko 能装进来 ──────────────
+      #    vermagic/MODVERSIONS 解决后,剩下的失败模块缺的是 MIUI 私有符号
+      #    (power_debug_print_enabled / mi_power_save_battery_cave /
+      #     refcount_warn_saturate / mi_display_pm_suspend_callback_set),
+      #    这些符号守护在 m2y 关掉的私有开关下面 ⇒ 这里以桩形式补上。
+      #    效果:充电器模块(WiFi/电池)与 WLAN 模块可加载。
+      - name: MIUI 私有符号桩
+        run: |
+          cd kernel
+          if [ -f ../patches/mi_syms.c ]; then
+            cp ../patches/mi_syms.c drivers/soc/qcom/mi_syms.c
+            grep -q 'mi_syms.o' drivers/soc/qcom/Makefile || echo 'obj-y += mi_syms.o' >> drivers/soc/qcom/Makefile
+            echo "=== mi_syms 接入情况 ==="
+            ls -la drivers/soc/qcom/mi_syms.c
+            tail -3 drivers/soc/qcom/Makefile
+          else
+            echo "::error::找不到 patches/mi_syms.c"
+            exit 1
+          fi
+
       # ── 固件加载器:对 -EACCES 重试(见 patches/fw-retry.py)──────────
       #    自编内核启动比原厂快 ~7 秒 ⇒ 5.67s 就请求 A660 GPU 固件,而那时
       #    /vendor/firmware 对内核还不可读(-EACCES)、ueventd 也还不能服务 sysfs
