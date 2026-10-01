@@ -624,7 +624,7 @@ jobs:
             S=arch/arm64/configs
             if [ ! -f "$S/vendor/star_droidspaces.config" ]; then
               cat > "$S/vendor/star_droidspaces.config" <<'DSF'
-          CONFIG_LOCALVERSION="-qgki"
+          CONFIG_LOCALVERSION="-qgki-gbb70cde46897"
           CONFIG_PID_NS=y
           CONFIG_IPC_NS=y
           CONFIG_SYSVIPC=y
