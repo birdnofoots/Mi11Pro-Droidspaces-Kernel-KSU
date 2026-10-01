@@ -311,6 +311,33 @@ jobs:
       # CONFIG_DRM_MSM 未开 ⇒ msm.o(含 msm_gem.o/msm_fb.o)整体没编,
       # 但 msm_fbdev.o 被编了 ⇒ 链接时一堆 undefined symbol。
       # 去掉它,保留 CONFIG_DRM_FBDEV_EMULATION=y 让 techpack 的 fbdev 生效。
+      # ── 补齐残缺树缺失的源文件 ────────────────────────────────
+      # hmhmdcy/Mi11Pro-Droidspaces-Kernel 的 .gitignore 里有 `vmlinux*`,
+      # 作者 git add 时误伤了两个"以 vmlinux 开头"的源文件:
+      #   arch/arm64/kernel/vmlinux.lds.S
+      #   include/asm-generic/vmlinux.lds.h
+      # 少它们 → 编译报 "No rule to make target .../vmlinux.lds"
+      # 从另一棵完整的 5.4 树拉过来补上。
+      - name: 补齐残缺树缺失的源文件
+        continue-on-error: true
+        run: |
+          cd kernel
+          SRC=https://raw.githubusercontent.com/liubutnotliu/kernel_xiaomi_mars/fourteen
+          for f in arch/arm64/kernel/vmlinux.lds.S include/asm-generic/vmlinux.lds.h; do
+            if [ ! -f "$f" ]; then
+              mkdir -p "$(dirname "$f")"
+              if curl -fsSL --retry 3 "$SRC/$f" -o "$f"; then
+                echo "✅ 补齐 $f ($(wc -c < "$f") 字节)"
+              else
+                echo "⚠️ 拉取失败: $f"
+              fi
+            else
+              echo "已存在: $f"
+            fi
+          done
+          echo "=== 检查 ==="
+          ls -la arch/arm64/kernel/vmlinux.lds.S include/asm-generic/vmlinux.lds.h 2>&1
+
       # ── 接入 logdump:内核日志周期性落盘(见 patches/logdump.c)──
 # ── fbcon 修复:让 techpack 的 msm_drm 整体编入 ─────────────
       # 之前漏编的对象 msm_fb.o / msm_gem.o 等嵌在 techpack 的
