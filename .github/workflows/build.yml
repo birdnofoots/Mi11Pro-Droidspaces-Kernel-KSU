@@ -564,13 +564,33 @@ jobs:
             fi
             echo "=== [QGKI 流程] 基础 defconfig ==="
             make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} gki_defconfig
+            # ★★ 关键一步(之前一直漏掉,导致 vmlinux 链接一堆 undefined symbol):
+            #   官方 generate_defconfig.sh 对 qgki 变体【不是直接用 star_GKI.config】,
+            #   而是先跑 scripts/gki/fragment_allyesconfig.sh 把它转成 ALLYES 片段
+            #   (该脚本就是 sed 's/=m$/=y/g',把 GKI 片段里的模块全变内建),
+            #   再把 ALLYES 片段参与合并。
+            #   少了这步 → CONFIG_QCOM_RPMH=m / HH_RM_DRV=m / MSM_GENI_SE=m ...
+            #   而消费方 QCOM_RTB=y / QCOM_GUESTVM=y / I3C_MASTER_MSM_GENI=y
+            #   → built-in 引用 module 符号 → vmlinux 链接必挂。
+            ALLYES=$S/vendor/star_ALLYES_GKI.config
+            if [ -f scripts/gki/fragment_allyesconfig.sh ]; then
+              bash scripts/gki/fragment_allyesconfig.sh "$S/vendor/star_GKI.config" "$ALLYES" \
+                && echo "✅ 生成 ALLYES 片段($(grep -c '=y$' "$ALLYES" 2>/dev/null) 个 =y)" \
+                || { echo "⚠️ ALLYES 生成失败"; ALLYES=""; }
+            else
+              echo "⚠️ 本树无 fragment_allyesconfig.sh,退回原样使用 star_GKI.config"
+              ALLYES=$S/vendor/star_GKI.config
+            fi
             FRAGS=""
-            # ★ 注意:generate_defconfig.sh 里 QCOM_DEBUG_FS_FRAG 被显式置成空格,
-            #   即【不使用 debugfs.config】。我之前误加了它 → 打开 SLUB_DEBUG/PAGE_OWNER
-            #   → mm/slub.o 编译失败。这里必须排除。
-            for f in vendor/star_GKI.config vendor/star_QGKI.config \
-                     vendor/star_consolidate.config vendor/star_droidspaces.config; do
-              [ -f "$S/$f" ] && FRAGS="$FRAGS $S/$f"
+            # ★ 官方 qgki 变体的合并链是:
+            #     base_defconfig → [allyes]GKI.config → QGKI.config → debugfs.config
+            #   ★ 普通 qgki 变体【不包含 consolidate.config】(那是
+            #     lahaina-qgki-consolidate_defconfig 变体才用的),之前误加,
+            #     它带来的 PAGE_OWNER / DEBUG_PAGEALLOC / QCOM_RTB=y 等把水搅浑了。
+            #   ★ debugfs.config 只在 TARGET_BUILD_VARIANT=user 时才加,且之前
+            #     实测会让 mm/slub.o 编译失败(SLUB_DEBUG/PAGE_OWNER),继续排除。
+            for f in "$ALLYES" "$S/vendor/star_QGKI.config" "$S/vendor/star_droidspaces.config"; do
+              [ -n "$f" ] && [ -f "$f" ] && FRAGS="$FRAGS $f"
             done
             echo "=== 合并片段:$FRAGS"
             scripts/kconfig/merge_config.sh -O out -m out/.config $FRAGS
