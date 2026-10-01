@@ -332,6 +332,15 @@ jobs:
           #   techpack/audio/include/uapi/**   ← 整个 uapi 目录没导入
           #     导致 wcdcal-hwdep.h 里 #include <audio/sound/msmcal-hwdep.h> 找不到
           K="$GITHUB_WORKSPACE/kernel"
+          # 官方 MiCode 树是完整的 → 不需要镜像(省一次 ~200MB 下载)。
+          # 只有 hmhmdcy 那棵被 .gitignore 误伤的树才需要补。
+          if [ -f "$K/techpack/audio/include/uapi/audio/sound/msmcal-hwdep.h" ] \
+             && [ -f "$K/arch/arm64/kernel/vmlinux.lds.S" ] \
+             && [ -f "$K/include/asm-generic/vmlinux.lds.h" ]; then
+            echo "✅ 树是完整的(官方源),跳过镜像补齐"
+            exit 0
+          fi
+          echo "⚠️ 树不完整,开始从官方 star-r-oss 镜像缺失文件"
           UP_TGZ=/tmp/star-r-oss.tar.gz
           UP_URL=https://codeload.github.com/MiCode/Xiaomi_Kernel_OpenSource/tar.gz/refs/heads/star-r-oss
           if curl -fL --retry 3 --retry-all-errors -o "$UP_TGZ" "$UP_URL"; then
@@ -534,11 +543,25 @@ jobs:
           set -euo pipefail
           cd kernel
           V="${{ matrix.variant }}"
-          if [ -f arch/arm64/configs/vendor/star_droidspaces.config ]; then
+          if [ -f arch/arm64/configs/vendor/star_QGKI.config ]; then
             # ★ QGKI 片段链树(小米官方 star/mars 源码 + Droidspaces 片段)
             #   参考 scripts/gki/generate_defconfig.sh:
             #   base_defconfig -> GKI -> QGKI -> consolidate -> (我们的)droidspaces
+            #   触发条件用 star_QGKI.config(官方 MiCode 树也有它),
+            #   而 star_droidspaces.config 只有 hmhmdcy 的树才有 → 没有就现场写。
             S=arch/arm64/configs
+            if [ ! -f "$S/vendor/star_droidspaces.config" ]; then
+              cat > "$S/vendor/star_droidspaces.config" <<'DSF'
+          CONFIG_LOCALVERSION="-qgki"
+          CONFIG_PID_NS=y
+          CONFIG_IPC_NS=y
+          CONFIG_SYSVIPC=y
+          CONFIG_POSIX_MQUEUE=y
+          CONFIG_DEVTMPFS=y
+          CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+          DSF
+              echo "已现场写入 star_droidspaces.config(6 个开关)"
+            fi
             echo "=== [QGKI 流程] 基础 defconfig ==="
             make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} gki_defconfig
             FRAGS=""
