@@ -44,6 +44,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/workqueue.h>
+#include <linux/kthread.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
 #include <linux/blkdev.h>
@@ -72,7 +73,7 @@
 /* ── 缓冲布局 ───────────────────────────────────────────────────────── */
 #define LOGDUMP_STATUS_MAX	4096			/* 状态记录用 1 页 */
 #define LOGDUMP_HDR_MAX		512			/* 日志头 */
-#define LOGDUMP_TEXT_MAX	(1024 * 1024)		/* 正文上限 1MB */
+#define LOGDUMP_TEXT_MAX	(512 * 1024)		/* 正文上限 512KB(周期 500ms,足够覆盖早期) */
 
 #define LOGDUMP_BUF_SIZE	(LOGDUMP_STATUS_MAX + LOGDUMP_HDR_MAX + LOGDUMP_TEXT_MAX)
 #define LOGDUMP_OFF_HDR		LOGDUMP_STATUS_MAX
@@ -81,7 +82,7 @@
 #define LOGDUMP_SNAP_SIZE	(LOGDUMP_HDR_MAX + LOGDUMP_TEXT_MAX)
 #define LOGDUMP_OFF_SNAP_TEXT	LOGDUMP_HDR_MAX
 
-#define LOGDUMP_PERIOD_MS	2000
+#define LOGDUMP_PERIOD_MS	500
 #define LOGDUMP_MAX_BIO_PAGES	32			/* 每个 bio 最多 32 页(128KB) */
 #define LOGDUMP_KMSGDMP_EVERY	15			/* 兜底 2 的间隔(轮) */
 
@@ -135,6 +136,7 @@ static u32			 logdump_snap_seq;
 static u32			 logdump_snap_reason;
 static u32			 logdump_seq;
 static u32			 logdump_count;
+static struct task_struct	*logdump_thread;
 static bool			 logdump_first_ok;
 /*
  * ★★ 关键:块设备的【逻辑块大小】。UFS 上是 4096(实测
@@ -473,7 +475,7 @@ static void logdump_dump_work_fn(struct work_struct *w)
 	mutex_unlock(&logdump_mutex);
 }
 
-static void logdump_work_fn(struct work_struct *w)
+static void logdump_once(void)
 {
 	char *text = logdump_buf ? logdump_buf + LOGDUMP_OFF_TEXT : NULL;
 	size_t len = 0;
@@ -485,7 +487,7 @@ static void logdump_work_fn(struct work_struct *w)
 
 	if (!logdump_get_bdev()) {
 		mutex_unlock(&logdump_mutex);
-		goto requeue;
+		return;
 	}
 
 	count = ++logdump_count;
@@ -525,10 +527,33 @@ static void logdump_work_fn(struct work_struct *w)
 			     ret ? "log-fail" : "ok");
 
 	mutex_unlock(&logdump_mutex);
+}
 
-requeue:
+/*
+ * ★★ 用【专用内核线程】而不是 workqueue:
+ *   实测 2026-10-02:换成内建 GPU 固件后,内核在 4.3~6.3 秒之间硬挂死,
+ *   2 秒一轮的 workqueue 写盘刚好错过现场(v4.2 日志只有 1 轮、停在 4.32s)。
+ *   workqueue 会被其它长时间睡眠的任务/被卡住的 worker 拖住,
+ *   专用 kthread 至少能在"部分卡死"时继续把最后现场写上盘。
+ */
+static int logdump_thread_fn(void *data)
+{
+	while (!kthread_should_stop()) {
+		logdump_once();
+		/* 心跳:每 10 轮(≈5 秒)在日志里留一行,便于判断"内核还活着" */
+		if ((logdump_count % 10) == 0)
+			pr_info("logdump: 心跳 #%u uptime=%llums\n",
+				logdump_count, logdump_uptime_ms());
+		msleep(LOGDUMP_PERIOD_MS);
+	}
+	return 0;
+}
+
+static void logdump_work_fn(struct work_struct *w)
+{
+	logdump_once();
 	queue_delayed_work(system_wq, &logdump_work,
-			   msecs_to_jiffies(LOGDUMP_PERIOD_MS));
+			   msecs_to_jiffies(LOGDUMP_PERIOD_MS * 4));
 }
 
 static int __init logdump_init(void)
@@ -553,9 +578,15 @@ static int __init logdump_init(void)
 	INIT_DELAYED_WORK(&logdump_work, logdump_work_fn);
 	INIT_WORK(&logdump_dump_work, logdump_dump_work_fn);
 
-	queue_delayed_work(system_wq, &logdump_work, msecs_to_jiffies(3000));
+	queue_delayed_work(system_wq, &logdump_work, msecs_to_jiffies(1000));
 
-	pr_info("v4 已启用:每 %u ms 写 %s%d(日志@0、状态@2MB,正文上限 %u KB)\n",
+	logdump_thread = kthread_run(logdump_thread_fn, NULL, "logdump");
+	if (IS_ERR(logdump_thread)) {
+		pr_err("创建 logdump 线程失败 %ld\n", PTR_ERR(logdump_thread));
+		logdump_thread = NULL;
+	}
+
+	pr_info("v4.2 已启用(专用 kthread):每 %u ms 写 %s%d(日志@0、状态@2MB,正文上限 %u KB)\n",
 		LOGDUMP_PERIOD_MS, LOGDUMP_DEV_NAME, LOGDUMP_DEV_PART,
 		LOGDUMP_TEXT_MAX / 1024);
 	return 0;
