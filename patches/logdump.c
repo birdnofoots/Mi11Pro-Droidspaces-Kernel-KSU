@@ -136,6 +136,15 @@ static u32			 logdump_snap_reason;
 static u32			 logdump_seq;
 static u32			 logdump_count;
 static bool			 logdump_first_ok;
+/*
+ * ★★ 关键:块设备的【逻辑块大小】。UFS 上是 4096(实测
+ *    /sys/block/sde/queue/logical_block_size = 4096)。
+ *    往块设备提交 bio 时,长度不是逻辑块大小整数倍 ⇒ sd/UFS 直接回 -EIO。
+ *    v4 第一版就栽在这里:37 个失败写入 100% 都不是 4096 的倍数,
+ *    唯一成功的那次(seq=1)长度 135168 = 4096×33。
+ *    ⇒ 所有写入都按这个值向上对齐。
+ */
+static unsigned int		 logdump_align = 512;
 
 static u64 logdump_uptime_ms(void)
 {
@@ -176,9 +185,17 @@ static struct block_device *logdump_get_bdev(void)
 	}
 
 	logdump_bdev = bdev;
-	pr_info("已打开 %s%d(devt %u:%u,容量 %llu 字节)\n",
+
+	/* 逻辑块大小:写入长度必须是它的整数倍,否则 -EIO */
+	logdump_align = bdev_logical_block_size(bdev);
+	if (logdump_align < 512)
+		logdump_align = 512;
+	if (logdump_align > PAGE_SIZE)
+		logdump_align = PAGE_SIZE;
+
+	pr_info("已打开 %s%d(devt %u:%u,容量 %llu 字节,逻辑块 %u 字节)\n",
 		LOGDUMP_DEV_NAME, LOGDUMP_DEV_PART, MAJOR(devt), MINOR(devt),
-		(unsigned long long)i_size_read(bdev->bd_inode));
+		(unsigned long long)i_size_read(bdev->bd_inode), logdump_align);
 	return bdev;
 }
 
@@ -199,14 +216,24 @@ static int logdump_write(loff_t offset, void *buf, size_t len)
 	if (!bdev)
 		return -ENODEV;
 
+	/*
+	 * ★ 长度必须按逻辑块大小向上对齐(尾部补零),否则驱动回 -EIO。
+	 *   128KB(LOGDUMP_MAX_BIO_PAGES*PAGE_SIZE)本身是 4096 的整数倍,
+	 *   所以除最后一块外每块都天然对齐。
+	 */
+	len = ALIGN(len, logdump_align);
+
 	devsz = i_size_read(bdev->bd_inode);
 	if (offset < 0 || (u64)offset + len > (u64)devsz) {
 		pr_err("写越界:offset=%lld len=%zu 分区容量=%lld\n",
 		       (long long)offset, len, (long long)devsz);
 		return -EINVAL;
 	}
-
-	len = ALIGN(len, 512);	/* 512 字节对齐,避免最后一块写不进去 */
+	if (offset & (logdump_align - 1)) {
+		pr_err("偏移没对齐:offset=%lld align=%u\n",
+		       (long long)offset, logdump_align);
+		return -EINVAL;
+	}
 
 	while (done < len) {
 		size_t chunk = min_t(size_t, len - done,
@@ -318,7 +345,8 @@ static void logdump_write_status(u32 count, u32 seq, int errcode, size_t len,
 		  tag, count, seq, source, (u32)len, errcode,
 		  (unsigned long long)st->uptime_ms);
 
-	ret = logdump_write(LOGDUMP_STAT_OFFSET, logdump_buf, 512);
+	/* 整页写出(4096 字节,天然是逻辑块大小的整数倍) */
+	ret = logdump_write(LOGDUMP_STAT_OFFSET, logdump_buf, LOGDUMP_STATUS_MAX);
 	if (ret)
 		pr_err("写状态记录失败 ret=%d\n", ret);
 }
@@ -350,8 +378,8 @@ static int logdump_write_log(char *buf, size_t text_off, size_t len, u32 seq,
 	h->uptime_ms = logdump_uptime_ms();
 	h->sum = logdump_sum(buf + text_off, len);
 
-	/* 尾部补零:避免上一轮更长的内容残留在头部声明的 body 之外 */
-	total = ALIGN(LOGDUMP_HDR_MAX + len, 512);
+	/* 尾部补零:既要避免上一轮更长的内容残留,也要满足逻辑块对齐 */
+	total = ALIGN(LOGDUMP_HDR_MAX + len, logdump_align);
 	if (total > LOGDUMP_HDR_MAX + len)
 		memset(buf + text_off + len, 0, total - LOGDUMP_HDR_MAX - len);
 
@@ -424,6 +452,18 @@ static void logdump_dump(struct kmsg_dumper *dumper, enum kmsg_dump_reason reaso
 	pr_emerg("dump 回调 reason=%d:已拷入静态快照 len=%zu,排队到 workqueue 落盘\n",
 		 (int)reason, len);
 	schedule_work(&logdump_dump_work);
+
+	/*
+	 * RESTART / HALT / POWEROFF 是【进程上下文】里发起的(reboot 系统调用 /
+	 * init 的 powerctl),睡眠是安全的 ⇒ 直接等落盘完成,避免"排了队但设备
+	 * 已经复位、work 还没跑完"(v4 第一版尾部丢失就是这个竞态 + 对齐问题)。
+	 * ⚠️ PANIC / OOPS 上下文绝不做这件事:那时其它 CPU 已停、workqueue 可能
+	 *    永远不会被调度,flush_work() 就是死锁。
+	 */
+	if (reason >= KMSG_DUMP_RESTART) {
+		pr_emerg("dump 回调:等 workqueue 落盘完成(进程上下文,可睡眠)\n");
+		flush_work(&logdump_dump_work);
+	}
 }
 
 static void logdump_dump_work_fn(struct work_struct *w)
