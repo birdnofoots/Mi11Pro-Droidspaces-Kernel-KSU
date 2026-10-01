@@ -326,21 +326,45 @@ jobs:
           #   MiCode/Xiaomi_Kernel_OpenSource 的 star-r-oss 分支
           #   (Makefile 同为 5.4.61、大小 64802 字节,完全一致)
           #   之前我从第三方 A14 树(liubutnotliu@fourteen)取 → 混树 ✗
-          SRC=https://raw.githubusercontent.com/MiCode/Xiaomi_Kernel_OpenSource/star-r-oss
-          for f in arch/arm64/kernel/vmlinux.lds.S include/asm-generic/vmlinux.lds.h; do
-            if [ ! -f "$f" ]; then
-              mkdir -p "$(dirname "$f")"
-              if curl -fsSL --retry 3 "$SRC/$f" -o "$f"; then
-                echo "✅ 补齐 $f ($(wc -c < "$f") 字节)"
-              else
-                echo "⚠️ 拉取失败: $f"
-              fi
-            else
-              echo "已存在: $f"
+          # 已知受害者(逐个补是打地鼠,现在改成整包镜像):
+          #   arch/arm64/kernel/vmlinux.lds.S
+          #   include/asm-generic/vmlinux.lds.h
+          #   techpack/audio/include/uapi/**   ← 整个 uapi 目录没导入
+          #     导致 wcdcal-hwdep.h 里 #include <audio/sound/msmcal-hwdep.h> 找不到
+          K="$GITHUB_WORKSPACE/kernel"
+          UP_TGZ=/tmp/star-r-oss.tar.gz
+          UP_URL=https://codeload.github.com/MiCode/Xiaomi_Kernel_OpenSource/tar.gz/refs/heads/star-r-oss
+          if curl -fL --retry 3 --retry-all-errors -o "$UP_TGZ" "$UP_URL"; then
+            echo "✅ 官方树下载完成 ($(du -h "$UP_TGZ" | cut -f1))"
+          else
+            echo "⚠️ 官方树下载失败 —— 退回逐个补关键文件"
+            SRC=https://raw.githubusercontent.com/MiCode/Xiaomi_Kernel_OpenSource/star-r-oss
+            for f in arch/arm64/kernel/vmlinux.lds.S include/asm-generic/vmlinux.lds.h \
+                     techpack/audio/include/uapi/audio/sound/msmcal-hwdep.h; do
+              [ -f "$K/$f" ] && { echo "已存在: $f"; continue; }
+              mkdir -p "$K/$(dirname "$f")"
+              curl -fsSL --retry 3 "$SRC/$f" -o "$K/$f" \
+                && echo "✅ 补齐 $f ($(wc -c < "$K/$f") 字节)" || echo "⚠️ 拉取失败: $f"
+            done
+          fi
+          if [ -s "$UP_TGZ" ]; then
+            rm -rf /tmp/off && mkdir -p /tmp/off && tar xzf "$UP_TGZ" -C /tmp/off
+            OFF=$(find /tmp/off -maxdepth 1 -mindepth 1 -type d | head -1)
+            if [ -d "$OFF" ]; then
+              # 只补【缺失】的文件,绝不覆盖 hmhmdcy 已有的改动
+              MISS=$( cd "$OFF" && find . -type f | while IFS= read -r f; do
+                        [ -e "$K/$f" ] || echo "$f"; done )
+              echo "缺失文件总数: $(printf '%s\n' "$MISS" | grep -c .)"
+              printf '%s\n' "$MISS" | grep . | head -40
+              printf '%s\n' "$MISS" | grep . | while IFS= read -r f; do
+                mkdir -p "$K/$(dirname "$f")"; cp "$OFF/$f" "$K/$f"; done
             fi
-          done
+            rm -f "$UP_TGZ"
+          fi
           echo "=== 检查 ==="
-          ls -la arch/arm64/kernel/vmlinux.lds.S include/asm-generic/vmlinux.lds.h 2>&1
+          ls -la "$K/arch/arm64/kernel/vmlinux.lds.S" \
+                 "$K/include/asm-generic/vmlinux.lds.h" \
+                 "$K/techpack/audio/include/uapi/audio/sound/msmcal-hwdep.h" 2>&1
 
       # ── 接入 logdump:内核日志周期性落盘(见 patches/logdump.c)──
 # ── fbcon 修复:让 techpack 的 msm_drm 整体编入 ─────────────
