@@ -102,6 +102,11 @@ jobs:
               #    Droidspaces 片段,走官方 QGKI 片段链构建(不是单个 defconfig)
               "star-ds":          {"defconfig": "(QGKI 片段链)",                      "lto": "keep", "ksu": "0", "kabi": "0", "desc": "官方 star 树 + QGKI 片段链 + star_droidspaces.config"},
               "star-ds-ksu":      {"defconfig": "(QGKI 片段链)",                      "lto": "keep", "ksu": "1", "kabi": "0", "desc": "同上 + 内建 KernelSU(刷完即 root)"},
+              # ★★ 「原厂完整配置」路线:不用片段链,直接用 mars_qgki_ds_defconfig
+              #    (原厂 /proc/config.gz 原样 + 12 个 Droidspaces 开关),
+              #    并把 =m 的驱动选择性翻成 =y(触摸/充电/指纹/BT/NFC/SLIMBUS/MI_*)。
+              #    动机:片段链缺这 62 项 ⇒ 自编内核上触摸/电池/WLAN 全废(见 §63)。
+              "star-stock":       {"defconfig": "vendor/mars_qgki_ds_defconfig",    "directcfg": "1", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "★ star 树 + 原厂完整配置 + =m 选择性内建 + 全部补丁"},
               # ★ 诊断:把 panic 时的内核日志写进 boot_a 分区,重启后可以 dd 读出来。
               #   配合 cmdline 里的 androidboot.init_fatal_panic=1,
               #   让 init 的致命失败变成内核 panic → pstore/blk 落盘。
@@ -587,7 +592,18 @@ jobs:
           set -euo pipefail
           cd kernel
           V="${{ matrix.variant }}"
-          if [ -f arch/arm64/configs/vendor/star_QGKI.config ]; then
+          if [ "${{ matrix.directcfg }}" = "1" ]; then
+            # ★★ 直用指定 defconfig(不拼 QGKI 片段链)——「原厂完整配置」路线。
+            #    动机:片段链缺 62 个 MIUI 私有开关(触摸/充电/指纹/BT/NFC/SLIMBUS/MI_*),
+            #    而 gh/configs/mars_qgki_ds_defconfig 就是设备原厂 /proc/config.gz
+            #    原样 + 12 个 Droidspaces 开关(已逐项核对:2085 项零差异)。
+            #    =m 的驱动则用 patches/m2y.py 选择性翻成 =y(原厂 .ko 因 CRC 装不进来)。
+            DEF="${{ matrix.defconfig }}"
+            mkdir -p arch/arm64/configs/vendor
+            cp "../configs/$(basename "$DEF")" "arch/arm64/configs/$DEF"
+            python3 ../patches/m2y.py "arch/arm64/configs/$DEF"
+            make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} "$DEF"
+          elif [ -f arch/arm64/configs/vendor/star_QGKI.config ]; then
             # ★ QGKI 片段链树(小米官方 star/mars 源码 + Droidspaces 片段)
             #   参考 scripts/gki/generate_defconfig.sh:
             #   base_defconfig -> GKI -> QGKI -> consolidate -> (我们的)droidspaces
