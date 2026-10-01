@@ -434,6 +434,22 @@ jobs:
           python3 ../patches/fw-retry.py
           grep -n "mars 补丁" -A3 drivers/base/firmware_loader/main.c | head -12
 
+      # ── KGSL:补上 KGSL_PROP_VK_DEVICE_ID(★★ surfaceflinger 起不来的真正根因)──
+      #    铁证(从失败启动的用户态 logcat 抓到,2026-10-02):
+      #      E Adreno-GSL: Error -2 attempting to get the VK_DEVICE_ID property
+      #      W libEGL  : eglInitialize(...) failed (EGL_BAD_ALLOC)
+      #      F RenderEngine: no suitable EGLConfig found, giving up
+      #    ⇒ 我们这棵树(官方 star-r-oss,A11 时代)的 KGSL 比原厂 A13 内核旧,
+      #      少这一个属性;原厂用户态 libgsl.so 里就有
+      #      "KGSL_PROP_VK_DEVICE_ID not available at run time"。
+      #    详见 patches/vkdevid.py 顶部注释(含同 SM8350 的参考实现)。
+      #    ⚠️ 故意【不加 continue-on-error】:打不上必须让构建失败。
+      - name: KGSL VK_DEVICE_ID 属性补丁
+        run: |
+          cd kernel
+          python3 ../patches/vkdevid.py
+          grep -n "KGSL_PROP_VK_DEVICE_ID" include/uapi/linux/msm_kgsl.h drivers/gpu/msm/adreno.c | head -8
+
       # ── 解开看门狗的 range 锁 ────────────────────────────────
       - name: 对齐原厂 watchdog 时间
         continue-on-error: true
