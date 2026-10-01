@@ -421,6 +421,19 @@ jobs:
             exit 1
           fi
 
+      # ── 固件加载器:对 -EACCES 重试(见 patches/fw-retry.py)──────────
+      #    自编内核启动比原厂快 ~7 秒 ⇒ 5.67s 就请求 A660 GPU 固件,而那时
+      #    /vendor/firmware 对内核还不可读(-EACCES)、ueventd 也还不能服务 sysfs
+      #    回退 ⇒ GPU 固件永久加载失败 ⇒ surfaceflinger 'no suitable EGLConfig
+      #    found' 自杀 ⇒ 启动循环。这里对 -EACCES 重试最多 10 秒。
+      #    ⚠️ 故意【不加 continue-on-error】:补丁打不上就必须让构建失败,
+      #       否则又会静默丢掉这个关键修复(参照 TAKEOVER.md §32 的教训)。
+      - name: 固件加载器 -EACCES 重试补丁
+        run: |
+          cd kernel
+          python3 ../patches/fw-retry.py
+          grep -n "mars 补丁" -A3 drivers/base/firmware_loader/main.c | head -12
+
       # ── 解开看门狗的 range 锁 ────────────────────────────────
       - name: 对齐原厂 watchdog 时间
         continue-on-error: true
@@ -621,6 +634,22 @@ jobs:
           fi
           if [ "${{ matrix.lto }}" = "none" ]; then
             scripts/config --file out/.config -d LTO_CLANG -d LTO_CLANG_THIN -e LTO_NONE
+          fi
+          # ★★★ 把 A660 GPU 固件【直接编进内核镜像】(CONFIG_EXTRA_FIRMWARE):
+          #   内核内建固件表在文件系统 / SELinux / ueventd 之前被查找 ⇒ 彻底绕开
+          #   "早期 /vendor/firmware 对内核不可读(-EACCES)+ ueventd 还没就绪" 的时序问题。
+          #   实证:该时序问题让 Adreno GPU 永远起不来 ⇒ surfaceflinger 的 RenderEngine
+          #   报 'no suitable EGLConfig found' 自杀 ⇒ 系统启动无限循环(106s 被 init 重启)。
+          if [ -f ../firmware/a660_sqe.fw ]; then
+            mkdir -p firmware/mars
+            cp -f ../firmware/a660_* firmware/mars/
+            ls -la firmware/mars/
+            scripts/config --file out/.config \
+              --set-str EXTRA_FIRMWARE "a660_sqe.fw a660_gmu.bin a660_zap.mdt a660_zap.b00 a660_zap.b01 a660_zap.b02" \
+              --set-str EXTRA_FIRMWARE_DIR "firmware/mars"
+            grep -E '^CONFIG_EXTRA_FIRMWARE' out/.config
+          else
+            echo "::warning::找不到 ../firmware/a660_*,跳过内建固件"
           fi
           make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} olddefconfig
           echo "=== kernelrelease ==="
