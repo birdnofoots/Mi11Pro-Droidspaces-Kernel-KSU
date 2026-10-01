@@ -455,6 +455,18 @@ jobs:
           python3 ../patches/vkdevid.py
           grep -n "KGSL_PROP_VK_DEVICE_ID" include/uapi/linux/msm_kgsl.h drivers/gpu/msm/adreno.c | head -8
 
+      # ── vergmagic:让自编内核与原厂 vermagic 逐字节一致 ⇒ 原厂 .ko 能装进来 ──
+      #    配套:配置里关掉 CONFIG_MODVERSIONS(跳过符号 CRC 校验)。
+      #    这样原厂 vendor 模块(WLAN/相机/音频/ADSP/biometric...)都能加载,
+      #    不必再手写驱动。详见 patches/vermagic.py 顶部注释。
+      #    ⚠️ 不加 continue-on-error:打不上必须让构建失败。
+      - name: vermagic 对齐原厂补丁
+        run: |
+          cd kernel
+          python3 ../patches/vermagic.py
+          grep -n "MODULE_VERMAGIC_MODVERSIONS" include/linux/vermagic.h
+          grep -n "CONFIG_MODVERSIONS" out/.config 2>/dev/null || true
+
       # ── 解开看门狗的 range 锁 ────────────────────────────────
       - name: 对齐原厂 watchdog 时间
         continue-on-error: true
@@ -619,6 +631,9 @@ jobs:
           CONFIG_POSIX_MQUEUE=y
           CONFIG_DEVTMPFS=y
           CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+          # ★ 原厂 .ko 能装进来的关键:关掉符号 CRC 校验
+          #   (vermagic 那边的 "modversions " 字样由 patches/vermagic.py 补)
+          # CONFIG_MODVERSIONS is not set
           DSF
               echo "已现场写入 star_droidspaces.config(6 个开关)"
             fi
