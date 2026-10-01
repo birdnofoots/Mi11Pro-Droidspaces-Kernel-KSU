@@ -45,6 +45,7 @@
 #include <linux/init.h>
 #include <linux/workqueue.h>
 #include <linux/kthread.h>
+#include <linux/delay.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
 #include <linux/blkdev.h>
@@ -544,7 +545,11 @@ static int logdump_thread_fn(void *data)
 		if ((logdump_count % 10) == 0)
 			pr_info("logdump: 心跳 #%u uptime=%llums\n",
 				logdump_count, logdump_uptime_ms());
-		msleep(LOGDUMP_PERIOD_MS);
+		/*
+		 * 前 3 分钟密写(500ms,抓启动/挂死现场);之后降到 10 秒一次,
+		 * 避免系统正常长时间运行时一直以 ~1MB/s 写 UFS 磨损闪存。
+		 */
+		msleep(logdump_uptime_ms() < 180000 ? LOGDUMP_PERIOD_MS : 10000);
 	}
 	return 0;
 }
