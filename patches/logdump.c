@@ -64,6 +64,7 @@
 #include <linux/syslog.h>
 #include <linux/uaccess.h>
 #include <linux/printk.h>
+#include <linux/reboot.h>
 
 /* ── 目标分区 ───────────────────────────────────────────────────────── */
 #define LOGDUMP_DEV_NAME	"sde"
@@ -87,6 +88,20 @@
 #define LOGDUMP_PERIOD_MS	500
 #define LOGDUMP_MAX_BIO_PAGES	32			/* 每个 bio 最多 32 页(128KB) */
 #define LOGDUMP_KMSGDMP_EVERY	15			/* 兜底 2 的间隔(轮) */
+
+/*
+ * ★★★ 启动失败 ⇒ 自动进 fastboot(全自动调试的关键)
+ *   实测:启动失败时用户态会在 ~106 秒调用 reboot 重启(无限循环)。
+ *   这里由内核自己判断"启动失败",在用户态重启之前【主动 kernel_restart("bootloader")】
+ *   ⇒ 设备自动停在 FASTBOOT 界面,主机就能自动刷回原厂、读日志、再刷下一版,
+ *     全程不需要人按键。
+ *   判据:
+ *     1) uptime > LOGDUMP_BOOT_TIMEOUT_MS 仍没在日志里见到 "Boot completed";或
+ *     2) surfaceflinger SIGABRT 崩溃 ≥3 次 且 uptime > 45 秒(崩溃循环)
+ */
+#define LOGDUMP_BOOT_TIMEOUT_MS	100000
+#define LOGDUMP_SF_CRASH_LIMIT	3
+#define LOGDUMP_SF_CRASH_UPTIME	45000
 
 #define LOGDUMP_MAGIC		"KLOGDMP4"
 #define LOGDUMP_STAT_MAGIC	"KLOGSTT4"
@@ -144,6 +159,9 @@ static size_t			 logdump_prev_len;
 static size_t			 logdump_prev2_len;
 static u64			 logdump_len_same_since_ms;
 static u64			 logdump_last_dump_ms;
+static bool			 logdump_boot_done;	/* 见到 "Boot completed" */
+static bool			 logdump_auto_fb_done;	/* 已经触发过自动进 fastboot */
+static int			 logdump_sf_crashes;
 static bool			 logdump_first_ok;
 /*
  * ★★ 关键:块设备的【逻辑块大小】。UFS 上是 4096(实测
@@ -158,6 +176,18 @@ static unsigned int		 logdump_align = 512;
 static u64 logdump_uptime_ms(void)
 {
 	return div_u64(ktime_to_ns(ktime_get()), 1000000);
+}
+
+static bool logdump_memstr(const char *hay, size_t hlen, const char *needle)
+{
+	size_t nlen = strlen(needle), i;
+
+	if (!nlen || hlen < nlen)
+		return false;
+	for (i = 0; i + nlen <= hlen; i++)
+		if (!memcmp(hay + i, needle, nlen))
+			return true;
+	return false;
 }
 
 static u32 logdump_sum(const char *p, size_t len)
@@ -531,6 +561,7 @@ static void logdump_once(void)
 	/* 0) 日志停涨(疑似卡死)⇒ 先把所有任务状态打进日志,本轮的采集就会带上它 */
 	logdump_check_stuck();
 
+
 	/* 1) 先把上一轮崩溃回调留下的快照落盘(那才是真正的现场) */
 	logdump_flush_snapshot();
 
@@ -556,6 +587,20 @@ static void logdump_once(void)
 			source = LOGDUMP_SRC_KMSGDMP;
 	}
 
+	/* 3.5) 判断启动是否成功(只看日志尾部 64KB,足够看到最新消息) */
+	if (!logdump_boot_done && len) {
+		const char *tail = text + (len > 65536 ? len - 65536 : 0);
+		size_t tlen = len > 65536 ? 65536 : len;
+
+		if (logdump_memstr(tail, tlen, "Boot completed")) {
+			logdump_boot_done = true;
+			pr_info("logdump: 检测到 Boot completed,关闭自动进 fastboot\n");
+		} else if (logdump_memstr(tail, tlen, "surfaceflinger") &&
+			   logdump_memstr(tail, tlen, "received signal 6")) {
+			logdump_sf_crashes++;
+		}
+	}
+
 	/* 4) 落盘:先记"本轮开始",再写日志,最后记结果 */
 	logdump_write_status(count, seq, 0, len, source, 0, "begin");
 	if (len)
@@ -569,6 +614,27 @@ static void logdump_once(void)
 	logdump_prev_len = len;
 
 	mutex_unlock(&logdump_mutex);
+
+	/*
+	 * ★ 5) 启动失败 ⇒ 自动重启到 bootloader(fastboot)。
+	 *   注意:必须在本轮日志【已经落盘之后】再做,否则会丢掉最后的现场。
+	 */
+	if (!logdump_boot_done && !logdump_auto_fb_done) {
+		u64 up = logdump_uptime_ms();
+		bool timeout_fail = up > LOGDUMP_BOOT_TIMEOUT_MS;
+		bool crash_fail = logdump_sf_crashes >= LOGDUMP_SF_CRASH_LIMIT &&
+				  up > LOGDUMP_SF_CRASH_UPTIME;
+
+		if (timeout_fail || crash_fail) {
+			logdump_auto_fb_done = true;
+			pr_emerg("logdump: 判定启动失败(%s: uptime=%llums, sf_crash=%d)"
+				 "⇒ 自动重启到 bootloader 进 FASTBOOT\n",
+				 timeout_fail ? "超时未见 Boot completed" : "surfaceflinger 反复崩溃",
+				 up, logdump_sf_crashes);
+			logdump_write_status(count, seq, 0, len, source, 0, "auto-fastboot");
+			kernel_restart("bootloader");
+		}
+	}
 }
 
 /*
