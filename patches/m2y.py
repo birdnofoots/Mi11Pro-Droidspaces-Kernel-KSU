@@ -35,6 +35,9 @@ KEEP = ('CONFIG_ICNSS2', 'CONFIG_CNSS2', 'CONFIG_MEDIA_TUNER_')
 #    其余是同类"小米/高通私有 debug/回收/HW 抽象"开关,公开树大概率没有实现,
 #    先一起关掉换一次干净的编译;之后按需再逐个打开。
 DISABLE = (
+    # ★ 关键:关掉符号 CRC 校验 ⇒ 原厂 vendor 模块(WLAN/相机/音频/ADSP)才能装进来。
+    #   vermagic 里的 "modversions " 字样由 patches/vermagic.py 补上。
+    'CONFIG_MODVERSIONS',
     'CONFIG_DEBUG_POWER_MI',
     'CONFIG_MI_RECLAIM',
     'CONFIG_BOOTUP_RECLAIM',
