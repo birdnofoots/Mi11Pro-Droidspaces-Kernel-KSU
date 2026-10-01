@@ -518,7 +518,10 @@ jobs:
             echo "=== [QGKI 流程] 基础 defconfig ==="
             make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} gki_defconfig
             FRAGS=""
-            for f in vendor/debugfs.config vendor/star_GKI.config vendor/star_QGKI.config \
+            # ★ 注意:generate_defconfig.sh 里 QCOM_DEBUG_FS_FRAG 被显式置成空格,
+            #   即【不使用 debugfs.config】。我之前误加了它 → 打开 SLUB_DEBUG/PAGE_OWNER
+            #   → mm/slub.o 编译失败。这里必须排除。
+            for f in vendor/star_GKI.config vendor/star_QGKI.config \
                      vendor/star_consolidate.config vendor/star_droidspaces.config; do
               [ -f "$S/$f" ] && FRAGS="$FRAGS $S/$f"
             done
