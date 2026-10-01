@@ -587,6 +587,14 @@ static int logdump_thread_fn(void *data)
 			pr_info("logdump: 心跳 #%u uptime=%llums\n",
 				logdump_count, logdump_uptime_ms());
 		/*
+		 * ★ 每 50 轮(≈5~25 秒)打印一次【已加载模块列表】:
+		 *   排查"模块到底装上没有"时,内核 WARN dump 不一定发生,
+		 *   而 print_modules() 会把 "Modules linked in: ..." 写进日志,
+		 *   我们的采集就能把它落盘。
+		 */
+		if ((logdump_count % 50) == 0)
+			print_modules();
+		/*
 		 * 分级周期:
 		 *   前 15 秒 → 100ms(抓"4~5 秒就硬挂"这种早期现场,2 秒/500ms 都会错过)
 		 *   15~180 秒 → 500ms
