@@ -101,7 +101,7 @@
  *     1) uptime > LOGDUMP_BOOT_TIMEOUT_MS 仍没在日志里见到 "Boot completed";或
  *     2) surfaceflinger SIGABRT 崩溃 ≥3 次 且 uptime > 45 秒(崩溃循环)
  */
-#define LOGDUMP_BOOT_TIMEOUT_MS	150000
+#define LOGDUMP_BOOT_TIMEOUT_MS	600000
 #define LOGDUMP_SF_CRASH_LIMIT	3
 #define LOGDUMP_SF_CRASH_UPTIME	45000
 
