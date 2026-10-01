@@ -322,7 +322,11 @@ jobs:
         continue-on-error: true
         run: |
           cd kernel
-          SRC=https://raw.githubusercontent.com/liubutnotliu/kernel_xiaomi_mars/fourteen
+          # ★ 来源必须是【同一血统】:hmhmdcy 的树就是导入自
+          #   MiCode/Xiaomi_Kernel_OpenSource 的 star-r-oss 分支
+          #   (Makefile 同为 5.4.61、大小 64802 字节,完全一致)
+          #   之前我从第三方 A14 树(liubutnotliu@fourteen)取 → 混树 ✗
+          SRC=https://raw.githubusercontent.com/MiCode/Xiaomi_Kernel_OpenSource/star-r-oss
           for f in arch/arm64/kernel/vmlinux.lds.S include/asm-generic/vmlinux.lds.h; do
             if [ ! -f "$f" ]; then
               mkdir -p "$(dirname "$f")"
