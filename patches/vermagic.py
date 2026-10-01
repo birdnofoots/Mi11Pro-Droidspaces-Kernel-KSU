@@ -3,7 +3,7 @@
 
 ★ 铁证(2026-10-02,来自我们内核那轮启动日志 sda59):
     qmi_helpers: version magic
-      '5.4.233-gbb70cde46897 SMP preempt mod_unload modversions aarch64'
+      '5.4.233-qgki-gbb70cde46897 SMP preempt mod_unload modversions aarch64'
       should be
       '5.4.233-qgki SMP preempt mod_unload modversions aarch64'
     hwid: version magic '5.4.233-qgki-gbb70cde46897 ...' should be '5.4.233-qgki ...'
@@ -24,7 +24,7 @@
 import sys
 
 P = 'include/linux/vermagic.h'
-STOCK = '5.4.233-gbb70cde46897 SMP preempt mod_unload modversions aarch64'
+STOCK = '5.4.233-qgki-gbb70cde46897 SMP preempt mod_unload modversions aarch64'
 BLOCK = (
     '\n/*\n'
     ' * ★ mars 补丁:见 patches/vermagic.py 顶部注释。\n'
