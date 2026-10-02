@@ -102,6 +102,17 @@
  *     2) surfaceflinger SIGABRT 崩溃 ≥3 次 且 uptime > 45 秒(崩溃循环)
  */
 #define LOGDUMP_BOOT_TIMEOUT_MS	300000
+/*
+ * ★ 2026-10-03 诊断用:开箱现场快照 + 自动回 fastboot。
+ *   现象:内核能启动但卡在 ~50s(module_mutex 被某个 vendor 模块 init 永久占住,
+ *   msm_drm/触摸/电池等 29 个模块全装不上 ⇒ 无显示、无 WiFi)。
+ *   窗口问题:正文只覆盖最后 ~10 秒,而恢复流程要先刷回原厂(原厂 logdump 会覆盖分区开头),
+ *   所以把"卡死那一刻(55s)"的正文【额外写一份到 32MB 偏移】⇒ 刷回原厂后仍可读。
+ *   同时把 auto_fastboot 打开:300 秒后自己重启进 fastboot ⇒ 救机脚本自动刷回原厂,
+ *   全程不需要人工按键。
+ */
+#define LOGDUMP_SNAP2_OFFSET	(32ULL * 1024 * 1024)
+#define LOGDUMP_SNAP2_MS	55000
 #define LOGDUMP_SF_CRASH_LIMIT	3
 #define LOGDUMP_SF_CRASH_UPTIME	45000
 
@@ -163,6 +174,7 @@ static u64			 logdump_len_same_since_ms;
 static u64			 logdump_last_dump_ms;
 static bool			 logdump_boot_done;	/* 见到 "Boot completed" */
 static bool			 logdump_auto_fb_done;	/* 已经触发过自动进 fastboot */
+static bool			 logdump_snap2_done;	/* 55s 现场快照已写 */
 static int			 logdump_sf_crashes;
 static size_t			 logdump_sf_scan_off;	/* v4.8:已统计过的正文长度 */
 static bool			 logdump_first_ok;
@@ -175,7 +187,7 @@ static bool			 logdump_first_ok;
  *       自己冲进 fastboot,表现为"黑屏 → 小绿人"循环。
  *       调试期需要时用 cmdline logdump.logdump_auto_fastboot=1 打开。
  */
-static bool			 logdump_auto_fastboot = false;
+static bool			 logdump_auto_fastboot = true;   /* ★ 诊断期:300s 自动回 fastboot */
 module_param(logdump_auto_fastboot, bool, 0644);
 /*
  * ★★ 关键:块设备的【逻辑块大小】。UFS 上是 4096(实测
@@ -548,6 +560,15 @@ static int logdump_write_log(char *buf, size_t text_off, size_t len, u32 seq,
 		memset(buf + text_off + len, 0, total - LOGDUMP_HDR_MAX - len);
 
 	ret = logdump_write(LOGDUMP_LOG_OFFSET, h, total);
+	/* ★ 卡死瞬间(≥55s)把同一份正文另存到 32MB,刷回原厂后仍能读回现场 */
+	if (!logdump_snap2_done && logdump_uptime_ms() >= LOGDUMP_SNAP2_MS) {
+		logdump_snap2_done = true;
+		if (logdump_write(LOGDUMP_SNAP2_OFFSET, h, total))
+			pr_err("现场快照写入失败\n");
+		else
+			pr_emerg("logdump: 已在 %llums 写入现场快照(32MB 偏移)\n",
+				 (unsigned long long)logdump_uptime_ms());
+	}
 	if (ret) {
 		pr_err("写日志失败 seq=%u len=%zu src=%u ret=%d\n",
 		       seq, len, source, ret);
@@ -797,7 +818,7 @@ static int logdump_thread_fn(void *data)
 		 *   而 print_modules() 会把 "Modules linked in: ..." 写进日志,
 		 *   我们的采集就能把它落盘。
 		 */
-		if ((logdump_count % 50) == 0)
+		if ((logdump_count % 5) == 0)
 			print_modules();
 		/*
 		 * ★★★ v4.7:
