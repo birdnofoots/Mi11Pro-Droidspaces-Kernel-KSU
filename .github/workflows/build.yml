@@ -457,6 +457,17 @@ jobs:
           cd kernel
           python3 ../patches/no-longpress.py .
 
+      # ── 补上公开树缺失的 MIUI 声明 ──────────────────────────────
+      #    run 36951823865 实测:CONFIG_DEBUG_POWER_MI=y 时
+      #    kernel/power/suspend.c 报 pm_system_dbg_info_print 隐式声明 +
+      #    DEBUG_INFO_RPM_STATS 未定义。**不能**因此关掉这个开关 ✗
+      #    (它是 power_debug_print_enabled 的来源 ⇒ 原厂充电器模块的命门),
+      #    只把这两句调试打印去掉。
+      - name: 补 MIUI power debug 声明
+        run: |
+          cd kernel
+          python3 ../patches/fix-debug-power-mi.py .
+
       # ── 固件加载器:对 -EACCES 重试(见 patches/fw-retry.py)──────────
       #    自编内核启动比原厂快 ~7 秒 ⇒ 5.67s 就请求 A660 GPU 固件,而那时
       #    /vendor/firmware 对内核还不可读(-EACCES)、ueventd 也还不能服务 sysfs
@@ -770,7 +781,7 @@ jobs:
         run: |
           cd kernel
           set +e
-          /usr/bin/time -v make O=out -j"$(nproc)" CC="$CC" LD="$LD" \
+          /usr/bin/time -v make -k O=out -j"$(nproc)" CC="$CC" LD="$LD" \
             SUBLEVEL=${SUBLEVEL_OVERRIDE} KCFLAGS=-Wno-error > /tmp/build.log 2>&1
           rc=$?
           mkdir -p ../artifacts
