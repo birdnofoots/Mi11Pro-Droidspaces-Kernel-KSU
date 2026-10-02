@@ -49,7 +49,15 @@ if "Droidspaces:公开树里没有 pm_system_dbg_info_print" in src:
     sys.exit(0)
 n = src.count(OLD)
 if n == 0:
-    print("::error::fix-debug-power-mi: 在 %s 里没找到预期代码块" % path)
+    # ★ 2026-10-02:上游 twelve 分支更新后 suspend.c 里已经完全没有
+    #   pm_system_dbg_info_print / DEBUG_INFO_RPM_* 了(公开树自己修好了或删掉了),
+    #   此时补丁无事可做 ⇒ 跳过,不算失败。
+    if "pm_system_dbg_info_print" not in src and "DEBUG_INFO_RPM_STATS" not in src:
+        print("fix-debug-power-mi: 上游已无这段调试打印"
+              "⇒ 无需补丁,跳过(%s)" % path)
+        sys.exit(0)
+    print("::error::fix-debug-power-mi: 在 %s 里没找到预期代码块"
+          "(但文件里仍有相关标识符,需人工同步补丁)" % path)
     sys.exit(1)
 src = src.replace(OLD, NEW)
 open(path, "w").write(src)
