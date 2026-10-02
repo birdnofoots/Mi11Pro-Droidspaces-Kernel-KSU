@@ -26,7 +26,7 @@
  *     ⇒ qti_battery_charger_main.ko 装不上 ⇒ 电量永远 100% ✗
  *   缺 refcount_warn_saturate
  *     ⇒ qca_cld3_wlan.ko 装不上 ⇒ WiFi 打不开 ✗
- *   缺 msm_pcie_*/mhi_force_reset
+ *   缺 msm_pcie_ 系列与 mhi_force_reset
  *     ⇒ cnss2/icnss2(WLAN 的 PCIe 栈)装不上 ⇒ WiFi 也起不来 ✗
  *   缺 mi_display_pm_suspend_callback_set ⇒ msm_drm.ko 装不上(显示靠内建驱动撑着)
  */
