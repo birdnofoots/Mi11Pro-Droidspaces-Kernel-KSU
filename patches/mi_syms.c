@@ -30,13 +30,6 @@
  *     ⇒ cnss2/icnss2(WLAN 的 PCIe 栈)装不上 ⇒ WiFi 也起不来 ✗
  *   缺 mi_display_pm_suspend_callback_set ⇒ msm_drm.ko 装不上(显示靠内建驱动撑着)
  */
-/*
- * ★ 2026-10-02:所有桩一律用 __weak。
- *   上游 twelve 分支更新后,msm_pcie_reg_dump / msm_pcie_set_target_link_speed /
- *   msm_pcie_dsp_link_control / mhi_force_reset 上游自己已经实现 ⇒ 强定义会撞
- *   "duplicate symbol" 编译失败。改成弱符号后:上游有就用上游的,没有才用我们的桩,
- *   以后上游再补任何符号都不会再撞。
- */
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -44,14 +37,14 @@
 #include <linux/bug.h>
 
 /* ── 充电/电池:qti_battery_charger_main.ko 需要 ───────────────────── */
-__weak int power_debug_print_enabled;
+int power_debug_print_enabled;
 EXPORT_SYMBOL(power_debug_print_enabled);
 
 /*
  * 原型未知 → 用 (void) 定义:ARM64 调用约定下实参留在寄存器里,
  * 被调方不读即无副作用;返回 0 表示"不干预"。
  */
-__weak int mi_power_save_battery_cave(void)
+int mi_power_save_battery_cave(void)
 {
 	return 0;
 }
@@ -61,7 +54,7 @@ EXPORT_SYMBOL(mi_power_save_battery_cave);
  *    仅当内核自己没有导出该符号时才补桩(MIUI 真实现存在时会重复定义)。
  */
 #if !IS_ENABLED(CONFIG_REFCOUNT_FULL)
-__weak void refcount_warn_saturate(void *r, int t)
+void refcount_warn_saturate(void *r, int t)
 {
 	WARN_ONCE(1, "refcount_warn_saturate() stub called (type=%d)\n", t);
 }
@@ -69,7 +62,7 @@ EXPORT_SYMBOL(refcount_warn_saturate);
 #endif
 
 /* ── 显示:msm_drm.ko 需要 ───────────────────────────────────────── */
-__weak int mi_display_pm_suspend_callback_set(void)
+int mi_display_pm_suspend_callback_set(void)
 {
 	return 0;
 }
@@ -82,25 +75,25 @@ EXPORT_SYMBOL(mi_display_pm_suspend_callback_set);
  *     msm_pcie_dsp_link_control()    : DSP(音频)侧链路控制 ⇒ 返回 0 不干预
  *     mhi_force_reset()              : 只在 WLAN SSR(异常恢复)时调用 ⇒ 只影响"出错后自愈"
  */
-__weak int msm_pcie_reg_dump(void)
+int msm_pcie_reg_dump(void)
 {
 	return 0;
 }
 EXPORT_SYMBOL(msm_pcie_reg_dump);
 
-__weak int msm_pcie_set_target_link_speed(void)
+int msm_pcie_set_target_link_speed(void)
 {
 	return 0;
 }
 EXPORT_SYMBOL(msm_pcie_set_target_link_speed);
 
-__weak int msm_pcie_dsp_link_control(void)
+int msm_pcie_dsp_link_control(void)
 {
 	return 0;
 }
 EXPORT_SYMBOL(msm_pcie_dsp_link_control);
 
-__weak int mhi_force_reset(void)
+int mhi_force_reset(void)
 {
 	return 0;
 }
@@ -119,14 +112,14 @@ EXPORT_SYMBOL(get_ufs_hba_data);
 void *get_ufs_sdev_data(void) { return NULL; }
 EXPORT_SYMBOL(get_ufs_sdev_data);
 
-__weak int ufs_get_string_desc(void) { return 0; }
+int ufs_get_string_desc(void) { return 0; }
 EXPORT_SYMBOL(ufs_get_string_desc);
 
-__weak int ufshcd_read_desc(void) { return 0; }
+int ufshcd_read_desc(void) { return 0; }
 EXPORT_SYMBOL(ufshcd_read_desc);
 
-__weak int ufs_read_desc_param(void) { return 0; }
+int ufs_read_desc_param(void) { return 0; }
 EXPORT_SYMBOL(ufs_read_desc_param);
 
-__weak unsigned long memblock_mem_size_in_gb(void) { return 0; }
+unsigned long memblock_mem_size_in_gb(void) { return 0; }
 EXPORT_SYMBOL(memblock_mem_size_in_gb);
