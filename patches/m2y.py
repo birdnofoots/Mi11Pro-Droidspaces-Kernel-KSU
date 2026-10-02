@@ -43,6 +43,13 @@ DISABLE = (
     # ★ 关键:关掉符号 CRC 校验 ⇒ 原厂 vendor 模块(WLAN/相机/音频/ADSP)才能装进来。
     #   vermagic 里的 "modversions " 字样由 patches/vermagic.py 补上。
     'CONFIG_MODVERSIONS',
+    # ★ 2026-10-02 追加:斩断"子系统异常 → panic → 看门狗咬 → PS_HOLD 硬复位"这条链。
+    #   实测(sde59 日志):内核能正常跑到 134 秒、无 panic 输出就硬复位;
+    #   关掉这两项后,即便有 oops/SSR 超时也只会【打印并继续】⇒ 日志能留下现场,
+    #   同时不再每 2 分钟复位一次。诊断期结束可以再打开。
+    'CONFIG_PANIC_ON_OOPS',
+    'CONFIG_PANIC_ON_SSR_NOTIF_TIMEOUT',
+    'CONFIG_QCOM_FORCE_WDOG_BITE_ON_PANIC',
 )
 
 lines = open(path).read().splitlines()
