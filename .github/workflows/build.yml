@@ -446,6 +446,17 @@ jobs:
             exit 1
           fi
 
+      # ── 中立化 MIUI 的「长按组合键 → 重启」──────────────────────
+      #    症状:自编内核开机约 9.7 秒必定重启(关机流程再卡 2.5~3 分钟),
+      #    证据:sde59 logdump 里 "collect D&R-state processes info before
+      #    long comb key" → 紧接着 "Synchronizing SCSI cache";
+      #    源码:drivers/input/misc/qpnp-power-on.c 的 longpress_kthread()
+      #    里 machine_restart(NULL)。原厂内核从不触发。
+      - name: 中立化 longpress 重启
+        run: |
+          cd kernel
+          python3 ../patches/no-longpress.py .
+
       # ── 固件加载器:对 -EACCES 重试(见 patches/fw-retry.py)──────────
       #    自编内核启动比原厂快 ~7 秒 ⇒ 5.67s 就请求 A660 GPU 固件,而那时
       #    /vendor/firmware 对内核还不可读(-EACCES)、ueventd 也还不能服务 sysfs
