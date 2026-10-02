@@ -42,7 +42,16 @@ ADR = 'drivers/gpu/msm/adreno.c'
 def patch(path, subs):
     s = open(path).read()
     orig = s
-    for old, new, desc in subs:
+    for item in subs:
+        old, new, desc = item[0], item[1], item[2]
+        # ★ 2026-10-02:上游已经自己加过这个属性时,只认自己那段原文不够
+        #   (写法不同 ⇒ 会插出第二份 adreno_get_vk_device_id ⇒
+        #    error: redefinition of 'adreno_get_vk_device_id')。
+        #   所以额外给每个替换项一个"特征串"(item[3]),特征串已存在就跳过。
+        needle = item[3] if len(item) > 3 else None
+        if needle and needle in s:
+            print("  [跳过] %s(上游已具备: %s)" % (desc, needle))
+            continue
         if old not in s:
             if new.strip() and new.strip() in s:
                 print("  [跳过] %s(已存在)" % desc)
@@ -60,6 +69,7 @@ HDR_SUBS = [(
     '#define KGSL_PROP_CONTEXT_PROPERTY\t0x28\n'
     '#define KGSL_PROP_VK_DEVICE_ID\t\t0x2A',
     'UAPI 常量 KGSL_PROP_VK_DEVICE_ID = 0x2A',
+    'KGSL_PROP_VK_DEVICE_ID',
 )]
 
 HELPER = '''/*
@@ -88,18 +98,21 @@ static int adreno_prop_u32('''
 ADR_SUBS = [
     ('static int adreno_prop_u32(',
      HELPER,
-     'adreno_get_vk_device_id() 取值函数'),
+     'adreno_get_vk_device_id() 取值函数',
+     'adreno_get_vk_device_id'),
     ('\telse if (param->type == KGSL_PROP_SPEED_BIN)\n'
      '\t\tval = device->speed_bin;\n',
      '\telse if (param->type == KGSL_PROP_SPEED_BIN)\n'
      '\t\tval = device->speed_bin;\n'
      '\telse if (param->type == KGSL_PROP_VK_DEVICE_ID)\n'
      '\t\tval = adreno_get_vk_device_id(device);\n',
-     'adreno_prop_u32() 里处理该属性'),
+     'adreno_prop_u32() 里处理该属性',
+     'val = adreno_get_vk_device_id(device)'),
     ('\t{ KGSL_PROP_GAMING_BIN, adreno_prop_gaming_bin },\n',
      '\t{ KGSL_PROP_GAMING_BIN, adreno_prop_gaming_bin },\n'
      '\t{ KGSL_PROP_VK_DEVICE_ID, adreno_prop_u32 },\n',
-     'adreno_property_funcs[] 注册'),
+     'adreno_property_funcs[] 注册',
+     'KGSL_PROP_VK_DEVICE_ID, adreno_prop_u32'),
 ]
 
 print("=== mars 补丁:KGSL_PROP_VK_DEVICE_ID ===")
