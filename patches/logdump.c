@@ -167,11 +167,15 @@ static int			 logdump_sf_crashes;
 static size_t			 logdump_sf_scan_off;	/* v4.8:已统计过的正文长度 */
 static bool			 logdump_first_ok;
 /*
- * v4.8:自动进 fastboot 开关(默认开,可用 cmdline
- *       logdump.logdump_auto_fastboot=0 关掉)。
- *       调试期它很有用;当成日常内核用时建议关掉,免得误判。
+ * v4.9:自动进 fastboot 开关【默认关】。
+ *       理由(2026-10-02 实测):判据是"内核日志里出现字符串 Boot completed",
+ *       而 Android 13 / MIUI 14 的内核日志里【根本不存在这个字符串】
+ *       (grep logdump-v6.txt → 0 命中) ⇒ logdump_boot_done 永远为假 ⇒
+ *       uptime>300s 必定 kernel_restart("bootloader") ⇒ 每次启动 5 分钟后
+ *       自己冲进 fastboot,表现为"黑屏 → 小绿人"循环。
+ *       调试期需要时用 cmdline logdump.logdump_auto_fastboot=1 打开。
  */
-static bool			 logdump_auto_fastboot = true;
+static bool			 logdump_auto_fastboot = false;
 module_param(logdump_auto_fastboot, bool, 0644);
 /*
  * ★★ 关键:块设备的【逻辑块大小】。UFS 上是 4096(实测
