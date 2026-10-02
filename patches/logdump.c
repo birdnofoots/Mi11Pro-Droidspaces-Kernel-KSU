@@ -102,27 +102,6 @@
  *     2) surfaceflinger SIGABRT 崩溃 ≥3 次 且 uptime > 45 秒(崩溃循环)
  */
 #define LOGDUMP_BOOT_TIMEOUT_MS	300000
-/*
- * ★ v4.9(2026-10-02):开箱现场冻结。
- *   问题:512KB 正文只覆盖最后 ~10 秒,刷完机过几分钟再去读 sde59 时,
- *        开机早期的模块加载/挂死现场【早就被冲掉了】(实测踩到:
- *        684~694s 的窗口里只有任务栈,看不到 modprobe 卡在哪)。
- *   做法:uptime 超过 LOGDUMP_FREEZE_MS 后彻底停止周期写盘 ⇒ sde59 里
- *        永远留着"最后一条 uptime≈90s 的记录",而它的正文覆盖 ~60~90s
- *        ——正好是 vendor_modprobe 加载那批驱动的时间窗。
- *   注意:崩溃快照(kmsg_dumper → flush_snapshot)是【另一条路径】,
- *        不受冻结影响,panic 现场照样能落盘。
- */
-#define LOGDUMP_FREEZE_MS	60000	/* 60s:正文窗口约 30~60s,正对 vendor_modprobe 那批 */
-/*
- * ★ 冷拷贝(2026-10-02):把同一份日志额外写到 32MB 偏移处。
- *   原因:出问题时这台机器往往【WiFi 和 USB adb 都不通】,唯一能读的就是 sde59;
- *   而一旦按抢修流程刷回原厂,原厂内核自己的 logdump 会覆盖【分区开头】那 0.5MB
- *   ⇒ 现场就没了。实测整个 64MB 分区里只有前 0.5MB 被用,
- *   所以把同一份(冻结前的)日志再写一份到 32MB,
- *   刷回原厂后仍可用 scripts/read-logdump.py 从 32MB 读回来。
- */
-#define LOGDUMP_COLD_OFFSET	(32ULL * 1024 * 1024)
 #define LOGDUMP_SF_CRASH_LIMIT	3
 #define LOGDUMP_SF_CRASH_UPTIME	45000
 
@@ -184,7 +163,6 @@ static u64			 logdump_len_same_since_ms;
 static u64			 logdump_last_dump_ms;
 static bool			 logdump_boot_done;	/* 见到 "Boot completed" */
 static bool			 logdump_auto_fb_done;	/* 已经触发过自动进 fastboot */
-static bool			 logdump_frozen;	/* 已冻结:停止周期写盘,保留开箱现场 */
 static int			 logdump_sf_crashes;
 static size_t			 logdump_sf_scan_off;	/* v4.8:已统计过的正文长度 */
 static bool			 logdump_first_ok;
@@ -570,9 +548,6 @@ static int logdump_write_log(char *buf, size_t text_off, size_t len, u32 seq,
 		memset(buf + text_off + len, 0, total - LOGDUMP_HDR_MAX - len);
 
 	ret = logdump_write(LOGDUMP_LOG_OFFSET, h, total);
-	/* ★ 冷拷贝:不然后面刷回原厂时,现场会被原厂 logdump 覆盖掉 */
-	if (!ret)
-		logdump_write(LOGDUMP_COLD_OFFSET, h, total);
 	if (ret) {
 		pr_err("写日志失败 seq=%u len=%zu src=%u ret=%d\n",
 		       seq, len, source, ret);
@@ -679,10 +654,7 @@ static void logdump_check_stuck(void)
 	}
 	if (now < 3000 || !logdump_len_same_since_ms)
 		return;
-	/* ★ 2026-10-02:原来 1500ms 太激进 —— 内核安静 2 秒是常态,结果每轮都
-	 *   show_state_filter(0) 打出 5000 行任务栈,把 512KB 正文冲得只剩 10 秒。
-	 *   提到 30 秒:只有真的卡死才 dump。*/
-	if (now - logdump_len_same_since_ms < 30000)
+	if (now - logdump_len_same_since_ms < 1500)
 		return;
 	if (now - logdump_last_dump_ms < 2000)
 		return;
@@ -695,16 +667,6 @@ static void logdump_check_stuck(void)
 
 static void logdump_once(void)
 {
-	/* ★ 开箱现场冻结:到点后彻底停止周期写盘(崩溃快照路径不受影响) */
-	if (logdump_frozen)
-		return;
-	if (logdump_uptime_ms() >= LOGDUMP_FREEZE_MS) {
-		logdump_frozen = true;
-		pr_emerg("logdump: 到 %dms 冻结日志,保留开箱现场(不再覆盖 sde59)\n",
-			 LOGDUMP_FREEZE_MS);
-		return;
-	}
-
 	char *text = logdump_buf ? logdump_buf + LOGDUMP_OFF_TEXT : NULL;
 	size_t len = 0;
 	u32 count, seq;
