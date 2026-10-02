@@ -27,44 +27,22 @@ path = sys.argv[1] if len(sys.argv) > 1 else \
     'arch/arm64/configs/vendor/mars_qgki_ds_defconfig'
 KEEP = ('CONFIG_ICNSS2', 'CONFIG_CNSS2', 'CONFIG_MEDIA_TUNER_')
 
-# ★★ 必须关掉的原厂开关:公开树(star-r-oss)里【没有它们依赖的实现】。
-#    逐个由编译错误发现:
-#      CONFIG_DEBUG_POWER_MI=y ⇒ kernel/power/suspend.c:94 调
-#        pm_system_dbg_info_print() 且用 DEBUG_INFO_RPM_STATS /
-#        DEBUG_INFO_RPM_MASTER_STATS,公开树头文件里没有声明 ⇒ 编译失败。
-#    其余是同类"小米/高通私有 debug/回收/HW 抽象"开关,公开树大概率没有实现,
-#    先一起关掉换一次干净的编译;之后按需再逐个打开。
+# ★★ 必须关掉的原厂开关
+#    ★ 2026-10-02 重要修正:原来这里列了 27 个"小米/高通私有 debug/回收/HW 抽象"
+#      开关,当初只是为了"一次编译能过"就一刀切关掉(见旧注释),**并没有证据**
+#      它们编不过。实测后果:关掉 CONFIG_OEM_KERNEL 之后,原厂 .ko 需要的
+#      power_debug_print_enabled / mi_power_save_battery_cave 等符号全没了,
+#      而且【PMIC 会在开机后几十秒 ~ 2.5 分钟硬复位】(日志里
+#      "IRQ pmic-wd-bark not found" + 无任何关机信息直接断掉),
+#      刷了 v3(三个内核侧补丁都打上)依旧每轮重启 ⇒ 复位来自 PMIC 硬件,
+#      与内核里那段 MIUI 诊断代码无关。
+#      ⇒ 恢复原厂值,只保留真正必要的 CONFIG_MODVERSIONS(关符号 CRC 校验,
+#        让原厂 vendor .ko 能装进来)。
+#      ⚠️ 若某个开关真的编不过,就把它单独加回本列表(并把报错记在下面)。
 DISABLE = (
     # ★ 关键:关掉符号 CRC 校验 ⇒ 原厂 vendor 模块(WLAN/相机/音频/ADSP)才能装进来。
     #   vermagic 里的 "modversions " 字样由 patches/vermagic.py 补上。
     'CONFIG_MODVERSIONS',
-    'CONFIG_DEBUG_POWER_MI',
-    'CONFIG_MI_RECLAIM',
-    'CONFIG_BOOTUP_RECLAIM',
-    'CONFIG_CAM_RECLAIM',
-    'CONFIG_MIHW',
-    'CONFIG_MILLET',
-    'CONFIG_MIGT',
-    'CONFIG_MIUI_ZRAM_MEMORY_TRACKING',
-    'CONFIG_MI_ZRAM_WRITEBACK_CONTROL',
-    'CONFIG_ZRAM_WRITEBACK',
-    'CONFIG_MI_UFS_FFU',
-    'CONFIG_UFSGKI',
-    'CONFIG_UFS_WB',
-    'CONFIG_TLB_CONF_HANDLER',
-    'CONFIG_HYFI_BRIDGE_HOOKS',
-    'CONFIG_PASSTHROUGH_SYSTEM',
-    'CONFIG_OEM_KERNEL',
-    'CONFIG_PERF_CRITICAL_RT_TASK',
-    'CONFIG_QGKI_SHOW_S2IDLE_WAKE_IRQ',
-    'CONFIG_QCOM_SYSMON_SUBSYSTEM_STATS',
-    'CONFIG_PACKAGE_RUNTIME_INFO',
-    'CONFIG_SF_BINDER',
-    'CONFIG_CLD',
-    'CONFIG_QTI_PLH',
-    'CONFIG_QTI_PLH_SCMI_CLIENT',
-    'CONFIG_QTI_SCMI_PLH_PROTOCOL',
-    'CONFIG_MTD_LAZYECCSTATS',
 )
 
 lines = open(path).read().splitlines()
