@@ -142,6 +142,7 @@ if "Droidspaces" in src and NEW1 in src and NEW2 in src and NEW3 in src:
     print("no-longpress: 已经打过补丁,跳过")
     sys.exit(0)
 
+skipped = []
 for name, old, new in (("longpress_kthread", OLD1, NEW1),
                        ("collect_d_work_func", OLD2, NEW2),
                        ("comb_reset_enable", OLD3, NEW3)):
@@ -149,6 +150,15 @@ for name, old, new in (("longpress_kthread", OLD1, NEW1),
         print("no-longpress: %s 已是补丁后状态,跳过" % name)
         continue
     if old not in src:
+        # ★ 2026-10-02:上游 twelve 分支把整段 MIUI longpress/组合键复位机制删掉了
+        #   (新版 qpnp-power-on.c 里 longpress_kthread / collect_d_work_func /
+        #    comb_reset_enable 一个都不存在)。此时补丁【已经过时】,
+        #   不是"上游改了需要同步",应当跳过而不是让构建失败。
+        if name not in src:
+            print("no-longpress: %s 在上游已不存在(MIUI 已删除该机制)"
+                  "⇒ 无需中立化,跳过" % name)
+            skipped.append(name)
+            continue
         print("::error::no-longpress: 在 %s 里没找到 %s 的预期代码 —— "
               "上游源码变了,补丁需要同步更新" % (path, name))
         sys.exit(1)
@@ -156,4 +166,7 @@ for name, old, new in (("longpress_kthread", OLD1, NEW1),
     print("no-longpress: 已中立化 %s" % name)
 
 open(path, "w").write(src)
-print("no-longpress: 完成(重启 + D&R 诊断两条路径都已中立化)")
+if skipped:
+    print("no-longpress: 完成(上游已自带修复,跳过 %s)" % ",".join(skipped))
+else:
+    print("no-longpress: 完成(重启 + D&R 诊断两条路径都已中立化)")
