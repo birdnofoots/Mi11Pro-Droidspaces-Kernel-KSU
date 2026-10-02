@@ -10,24 +10,24 @@ echo "块设备:"; lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT 2>/dev/null | head -12
 echo "adb   : $(command -v adb || echo 缺)  $(adb version 2>/dev/null | head -1)"
 echo "fastboot: $(command -v fastboot || echo 缺)  $(fastboot --version 2>/dev/null | head -1)"
 echo "git   : $(command -v git || echo 缺)"; echo "python3: $(command -v python3 || echo 缺)"
-echo "sudo  : $(echo gozilla | sudo -S id 2>/dev/null | head -1)"
+echo "sudo  : $(sudo id 2>/dev/null | head -1)"
 echo "当前 USB:"; lsusb 2>/dev/null | grep -viE "root hub" | head -8
 
 echo; echo "================= 1) 装 udev 规则(让 adb/fastboot 免 root 用 USB) ================="
 if [ ! -f /etc/udev/rules.d/51-android.rules ]; then
-  echo gozilla | sudo -S tee /etc/udev/rules.d/51-android.rules >/dev/null <<'RULES'
+  sudo tee /etc/udev/rules.d/51-android.rules >/dev/null <<'RULES'
 SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", MODE="0666", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="2717", MODE="0666", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="05c6", MODE="0666", GROUP="plugdev"
 RULES
-  echo gozilla | sudo -S udevadm control --reload-rules 2>/dev/null
-  echo gozilla | sudo -S udevadm trigger 2>/dev/null
+  sudo udevadm control --reload-rules 2>/dev/null
+  sudo udevadm trigger 2>/dev/null
   echo "已写入 /etc/udev/rules.d/51-android.rules ✓"
 else
   echo "已存在 udev 规则 ✓"
 fi
 if ! id -nG "$USER" | grep -qw plugdev; then
-  echo gozilla | sudo -S usermod -aG plugdev "$USER" && echo "已把 $USER 加入 plugdev 组(下次登录生效)✓"
+  sudo usermod -aG plugdev "$USER" && echo "已把 $USER 加入 plugdev 组(下次登录生效)✓"
 fi
 
 echo; echo "================= 2) adb server 对所有网卡监听(供容器远程使用) ================="
