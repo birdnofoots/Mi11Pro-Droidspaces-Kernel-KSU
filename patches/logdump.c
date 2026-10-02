@@ -113,7 +113,16 @@
  *   注意:崩溃快照(kmsg_dumper → flush_snapshot)是【另一条路径】,
  *        不受冻结影响,panic 现场照样能落盘。
  */
-#define LOGDUMP_FREEZE_MS	90000
+#define LOGDUMP_FREEZE_MS	60000	/* 60s:正文窗口约 30~60s,正对 vendor_modprobe 那批 */
+/*
+ * ★ 冷拷贝(2026-10-02):把同一份日志额外写到 32MB 偏移处。
+ *   原因:出问题时这台机器往往【WiFi 和 USB adb 都不通】,唯一能读的就是 sde59;
+ *   而一旦按抢修流程刷回原厂,原厂内核自己的 logdump 会覆盖【分区开头】那 0.5MB
+ *   ⇒ 现场就没了。实测整个 64MB 分区里只有前 0.5MB 被用,
+ *   所以把同一份(冻结前的)日志再写一份到 32MB,
+ *   刷回原厂后仍可用 scripts/read-logdump.py 从 32MB 读回来。
+ */
+#define LOGDUMP_COLD_OFFSET	(32ULL * 1024 * 1024)
 #define LOGDUMP_SF_CRASH_LIMIT	3
 #define LOGDUMP_SF_CRASH_UPTIME	45000
 
@@ -561,6 +570,9 @@ static int logdump_write_log(char *buf, size_t text_off, size_t len, u32 seq,
 		memset(buf + text_off + len, 0, total - LOGDUMP_HDR_MAX - len);
 
 	ret = logdump_write(LOGDUMP_LOG_OFFSET, h, total);
+	/* ★ 冷拷贝:不然后面刷回原厂时,现场会被原厂 logdump 覆盖掉 */
+	if (!ret)
+		logdump_write(LOGDUMP_COLD_OFFSET, h, total);
 	if (ret) {
 		pr_err("写日志失败 seq=%u len=%zu src=%u ret=%d\n",
 		       seq, len, source, ret);
