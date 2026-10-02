@@ -67,6 +67,11 @@ DISABLE = (
     'CONFIG_PANIC_ON_OOPS',
     'CONFIG_PANIC_ON_SSR_NOTIF_TIMEOUT',
     'CONFIG_QCOM_FORCE_WDOG_BITE_ON_PANIC',
+    # ★ 2026-10-03 关键:sde59 现场抓到"模块 init 里 request_firmware → 落到用户态回退 →
+    #   而 init 正卡在等 vendor_modprobe ⇒ 循环等待 ⇒ module_mutex 被永久占住"。
+    #   关掉用户态回退后:直接读 /vendor/firmware 失败就【立刻失败】,该模块快速退出,
+    #   module_mutex 释放 ⇒ 显示(msm_drm)/触摸/电池等 29 个模块才能装上。
+    'CONFIG_FW_LOADER_USER_HELPER_FALLBACK',
 )
 
 # ★★ 2026-10-02:整项彻底关掉(无论原厂是 =y 还是 =m)。
