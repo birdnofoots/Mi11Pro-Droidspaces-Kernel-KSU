@@ -488,15 +488,31 @@ jobs:
       #    found' 自杀 ⇒ 启动循环。这里对 -EACCES 重试最多 10 秒。
       #    ⚠️ 故意【不加 continue-on-error】:补丁打不上就必须让构建失败,
       #       否则又会静默丢掉这个关键修复(参照 TAKEOVER.md §32 的教训)。
-      # ── ⚠️ 2026-10-03 撤回:固件加载器 -EACCES 重试补丁 ──────────────
-      #    sde59 现场(开机 49.8~54.7s 的全任务栈)显示:
-      #      request_firmware_work_func 正在跑(用户态回退)
-      #      另一个 modprobe 卡在 load_module → __mutex_lock(module_mutex)
-      #    而 init 正卡在等 vendor_modprobe ⇒ 形成【循环等待】。
-      #    这个补丁"等用户态就绪再重试"的思路正是制造该循环的原因,
-      #    而且它在持有 fw_lock 时 msleep 最多 10 秒。
-      #    ⇒ 已改为关掉 CONFIG_FW_LOADER_USER_HELPER_FALLBACK(见 patches/m2y.py),
-      #      让读不到固件的模块【快速失败】而不是等用户态。
+      # ── 固件加载器 -EACCES 重试补丁(保留)──────────────────────────
+      #    自编内核启动比原厂快 ~7 秒 ⇒ 5.67s 就请求 A660 GPU 固件,那时
+      #    /vendor/firmware 对内核还不可读(-EACCES)⇒ GPU 固件永久失败 ⇒
+      #    surfaceflinger 拿不到 EGLConfig 自杀。这里对 -EACCES 重试最多 10 秒。
+      - name: 固件加载器 -EACCES 重试补丁
+        run: |
+          cd kernel
+          python3 ../patches/fw-retry.py
+          grep -n "mars 补丁" -A3 drivers/base/firmware_loader/main.c | head -12
+
+      # ── 固件"用户态回退"超时 60s → 5s(拆掉 module_mutex 循环等待)──
+      #    sde59 铁证(开机 49.8~54.7s 全任务栈):
+      #      modprobe D ... request_firmware_work_func   ← 固件落到用户态回退
+      #      modprobe D ... __mutex_lock ... load_module ← 模块 init 在等 module_mutex
+      #      init(用户态)卡在等 vendor_modprobe 批量
+      #    ⇒ cnss2/WLAN 那类模块在 init 里 request_firmware,直接读失败后
+      #      落到回退,而用户态 init 正等这批模块 ⇒ 循环等待 ⇒ 该模块 init
+      #      永不返回 ⇒ module_mutex 被永久占住 ⇒ msm_drm/触摸/电池等 29 个
+      #      模块全装不上(症状:无显示、无 WiFi)。
+      #    ⇒ 只把回退超时改小(机制保留):5 秒等不到就放弃 ⇒ 模块快速失败
+      #      ⇒ 锁释放 ⇒ 其余模块正常装载。详见 patches/fw-timeout.py。
+      - name: 固件回退超时改小(60s→5s)
+        run: |
+          cd kernel
+          python3 ../patches/fw-timeout.py .
 
       # ── 取消导出 RDDM MHI 符号:⚠️ 2026-10-02 实测【会让内核启动前就复位】──
       #    (f932d6a8 那版 + KILL CONFIG_CNSS2 一起上,结果 3~4 秒一轮的 LOGO↔黑屏循环,
