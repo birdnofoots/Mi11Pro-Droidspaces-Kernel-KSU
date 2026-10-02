@@ -494,14 +494,9 @@ jobs:
           python3 ../patches/fw-retry.py
           grep -n "mars 补丁" -A3 drivers/base/firmware_loader/main.c | head -12
 
-      # ── 取消导出 cnss2 依赖的 RDDM/调试 MHI 符号(让它快速失败而不是卡死)──
-      #    证据(sde59):cnss2 的 init 在我们内核上永不返回,死占 module_mutex,
-      #    导致 29 个模块(含 msm_drm/触摸/电池)全装不上 ⇒ 卡在开机动画。
-      #    详见 patches/unexport-mhi.py 顶部注释。找不到符号不报错(树不同名而已)。
-      - name: 取消导出 RDDM MHI 符号(WiFi 让位给可用系统)
-        run: |
-          cd kernel
-          python3 ../patches/unexport-mhi.py .
+      # ── 取消导出 RDDM MHI 符号:⚠️ 2026-10-02 实测【会让内核启动前就复位】──
+      #    (f932d6a8 那版 + KILL CONFIG_CNSS2 一起上,结果 3~4 秒一轮的 LOGO↔黑屏循环,
+      #     连内核都没跑起来)⇒ 已撤回。保留 patches/unexport-mhi.py 备查。
 
       # ── KGSL:补上 KGSL_PROP_VK_DEVICE_ID(★★ surfaceflinger 起不来的真正根因)──
       #    铁证(从失败启动的用户态 logcat 抓到,2026-10-02):
