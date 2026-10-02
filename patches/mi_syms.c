@@ -98,3 +98,28 @@ int mhi_force_reset(void)
 	return 0;
 }
 EXPORT_SYMBOL(mhi_force_reset);
+
+/* ── UFS/内存统计:mi_memory.ko 需要(实测日志:125.126 处 7 个 Unknown symbol) ──
+ *   原型未知 ⇒ 一律返回 NULL/0(该模块只是 MIUI 的内存 sysfs 辅助功能,
+ *   返回空值最多让那几个 sysfs 属性没数据,不会崩)。
+ */
+void *get_ufs_data(void) { return NULL; }
+EXPORT_SYMBOL(get_ufs_data);
+
+void *get_ufs_hba_data(void) { return NULL; }
+EXPORT_SYMBOL(get_ufs_hba_data);
+
+void *get_ufs_sdev_data(void) { return NULL; }
+EXPORT_SYMBOL(get_ufs_sdev_data);
+
+int ufs_get_string_desc(void) { return 0; }
+EXPORT_SYMBOL(ufs_get_string_desc);
+
+int ufshcd_read_desc(void) { return 0; }
+EXPORT_SYMBOL(ufshcd_read_desc);
+
+int ufs_read_desc_param(void) { return 0; }
+EXPORT_SYMBOL(ufs_read_desc_param);
+
+unsigned long memblock_mem_size_in_gb(void) { return 0; }
+EXPORT_SYMBOL(memblock_mem_size_in_gb);
