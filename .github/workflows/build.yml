@@ -457,6 +457,12 @@ jobs:
           cd kernel
           python3 ../patches/no-longpress.py .
 
+      # ── 关掉 PMIC(PON)看门狗:约 128 秒硬复位的真凶 ──────────────
+      - name: 关闭 PMIC 看门狗
+        run: |
+          cd kernel
+          python3 ../patches/no-pmic-wd.py .
+
       # ── 补上公开树缺失的 MIUI 声明 ──────────────────────────────
       #    run 36951823865 实测:CONFIG_DEBUG_POWER_MI=y 时
       #    kernel/power/suspend.c 报 pm_system_dbg_info_print 隐式声明 +
