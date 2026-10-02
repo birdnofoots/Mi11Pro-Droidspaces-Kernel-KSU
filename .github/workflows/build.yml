@@ -488,11 +488,15 @@ jobs:
       #    found' 自杀 ⇒ 启动循环。这里对 -EACCES 重试最多 10 秒。
       #    ⚠️ 故意【不加 continue-on-error】:补丁打不上就必须让构建失败,
       #       否则又会静默丢掉这个关键修复(参照 TAKEOVER.md §32 的教训)。
-      - name: 固件加载器 -EACCES 重试补丁
-        run: |
-          cd kernel
-          python3 ../patches/fw-retry.py
-          grep -n "mars 补丁" -A3 drivers/base/firmware_loader/main.c | head -12
+      # ── ⚠️ 2026-10-03 撤回:固件加载器 -EACCES 重试补丁 ──────────────
+      #    sde59 现场(开机 49.8~54.7s 的全任务栈)显示:
+      #      request_firmware_work_func 正在跑(用户态回退)
+      #      另一个 modprobe 卡在 load_module → __mutex_lock(module_mutex)
+      #    而 init 正卡在等 vendor_modprobe ⇒ 形成【循环等待】。
+      #    这个补丁"等用户态就绪再重试"的思路正是制造该循环的原因,
+      #    而且它在持有 fw_lock 时 msleep 最多 10 秒。
+      #    ⇒ 已改为关掉 CONFIG_FW_LOADER_USER_HELPER_FALLBACK(见 patches/m2y.py),
+      #      让读不到固件的模块【快速失败】而不是等用户态。
 
       # ── 取消导出 RDDM MHI 符号:⚠️ 2026-10-02 实测【会让内核启动前就复位】──
       #    (f932d6a8 那版 + KILL CONFIG_CNSS2 一起上,结果 3~4 秒一轮的 LOGO↔黑屏循环,
