@@ -64,3 +64,42 @@ int mi_display_pm_suspend_callback_set(void)
 	return 0;
 }
 EXPORT_SYMBOL(mi_display_pm_suspend_callback_set);
+
+/* ── WLAN PCIe/MHI 链路:cnss2.ko / icnss2.ko 需要 ──────────────────
+ *
+ * 这几个函数在【公开树里根本不存在】(已核实:drivers/pci/controller/dwc/
+ * pcie-qcom.c 里没有 msm_pcie_*,drivers/bus/mhi/core/mhi_main.c 里没有
+ * mhi_force_reset)⇒ 属于 MIUI 私有实现,没法靠改配置补出来 ✗。
+ *
+ * 语义取舍:
+ *   - msm_pcie_reg_dump()          : 纯调试 dump ⇒ 空实现无害 ✓
+ *   - msm_pcie_set_target_link_speed: 设链路速率;空实现=保持 bootloader
+ *                                     配好的速率不变 ⇒ 正常联网不受影响 ✓
+ *   - msm_pcie_dsp_link_control()  : DSP(音频)侧链路控制 ⇒ 返回 0 不干预 ✓
+ *   - mhi_force_reset()            : 只在 WLAN SSR(异常恢复)时调用 ⇒
+ *                                     空实现只影响"出错后自愈" ✗,不影响正常联网 ✓
+ * ⇒ 先让模块能装载、看 WiFi 能否正常起来;若 SSR 相关不稳,再另想办法 ✗。
+ */
+int msm_pcie_reg_dump(void)
+{
+	return 0;
+}
+EXPORT_SYMBOL(msm_pcie_reg_dump);
+
+int msm_pcie_set_target_link_speed(void)
+{
+	return 0;
+}
+EXPORT_SYMBOL(msm_pcie_set_target_link_speed);
+
+int msm_pcie_dsp_link_control(void)
+{
+	return 0;
+}
+EXPORT_SYMBOL(msm_pcie_dsp_link_control);
+
+int mhi_force_reset(void)
+{
+	return 0;
+}
+EXPORT_SYMBOL(mhi_force_reset);
