@@ -69,12 +69,26 @@ DISABLE = (
     'CONFIG_QCOM_FORCE_WDOG_BITE_ON_PANIC',
 )
 
+# ★★ 2026-10-02:整项彻底关掉(无论原厂是 =y 还是 =m)。
+#    与 unexport-mhi.py 配合:取消导出 cnss2 依赖的 RDDM/调试 MHI 符号后,
+#    树内自带的 cnss2.ko(CONFIG_CNSS2=m)会因 undefined 让 modpost 失败,
+#    所以把树内 CNSS2 一并关掉。设备 /vendor 里那个“原厂 cnss2.ko”仍在,
+#    init 会去装它,但它同样找不到这些符号 ⇒ 立刻 "Unknown symbol" 失败退出
+#    (而不是卡在 init 里死占 module_mutex),其余驱动即可正常装载。
+KILL = ('CONFIG_CNSS2',)
+
 lines = open(path).read().splitlines()
 out, flipped, kept, killed = [], [], [], []
 seen = set()
 for line in lines:
     m = re.match(r'^(CONFIG_[A-Za-z0-9_]+)=m$', line)
     my = re.match(r'^CONFIG_([A-Za-z0-9_]+)=y$', line)
+    mz = re.match(r'^(CONFIG_([A-Za-z0-9_]+))=[ym]$', line)
+    if mz and ('CONFIG_' + mz.group(2)) in KILL:
+        out.append('# CONFIG_%s is not set' % mz.group(2))
+        killed.append('CONFIG_' + mz.group(2))
+        seen.add('CONFIG_' + mz.group(2))
+        continue
     if my and ('CONFIG_' + my.group(1)) in DISABLE:
         out.append('# CONFIG_%s is not set' % my.group(1))
         killed.append('CONFIG_' + my.group(1))
