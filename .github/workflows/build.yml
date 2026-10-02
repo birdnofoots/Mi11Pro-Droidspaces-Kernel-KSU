@@ -107,6 +107,13 @@ jobs:
               #    并把 =m 的驱动选择性翻成 =y(触摸/充电/指纹/BT/NFC/SLIMBUS/MI_*)。
               #    动机:片段链缺这 62 项 ⇒ 自编内核上触摸/电池/WLAN 全废(见 §63)。
               "star-stock":       {"defconfig": "vendor/mars_qgki_ds_defconfig",    "directcfg": "1", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "★ star 树 + 原厂完整配置 + =m 选择性内建 + 全部补丁"},
+              # ★★ 2026-10-02 定案变体:原厂 config 原样【不做 =m→=y 翻转】+ 全部补丁。
+              #    证据(sde59 logdump):star-stock 把 62 项翻成内建后,/vendor 里同名 .ko
+              #    仍被 init 加载 ⇒ "Driver 'xxx' is already registered, aborting" ×N,
+              #    最后 WLAN modprobe 卡死(uptime 129.3s 被 init 超时 SIGKILL)⇒ 系统停住
+              #    ⇒ bootloader 判启动失败 ⇒ fastboot/回退原厂。
+              #    ⇒ 正解:保持 =m,让 /vendor 的原厂 .ko 自己装(vermagic 已对齐)。
+              "star-stock-raw":   {"defconfig": "vendor/mars_qgki_ds_defconfig",    "directcfg": "1", "noflip": "1", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "★★ 原厂 config + 不翻内建(保持 =m)+ 全部补丁"},
               # ★ 诊断:把 panic 时的内核日志写进 boot_a 分区,重启后可以 dd 读出来。
               #   配合 cmdline 里的 androidboot.init_fatal_panic=1,
               #   让 init 的致命失败变成内核 panic → pstore/blk 落盘。
@@ -661,7 +668,13 @@ jobs:
             DEF="${{ matrix.defconfig }}"
             mkdir -p arch/arm64/configs/vendor
             cp "../configs/$(basename "$DEF")" "arch/arm64/configs/$DEF"
-            python3 ../patches/m2y.py "arch/arm64/configs/$DEF"
+            # ★ 变体带 noflip=1 时,让 m2y 只做 DISABLE、不把 =m 翻成 =y
+            if [ "${{ matrix.noflip }}" = "1" ]; then
+              M2Y_NOFLIP=1 python3 ../patches/m2y.py "arch/arm64/configs/$DEF"
+              echo "本变体 NOFLIP=1:保持 =m,不内建 vendor 驱动"
+            else
+              python3 ../patches/m2y.py "arch/arm64/configs/$DEF"
+            fi
             make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} "$DEF"
           elif [ -f arch/arm64/configs/vendor/star_QGKI.config ]; then
             # ★ QGKI 片段链树(小米官方 star/mars 源码 + Droidspaces 片段)
