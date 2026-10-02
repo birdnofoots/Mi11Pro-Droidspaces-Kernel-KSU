@@ -67,11 +67,10 @@ DISABLE = (
     'CONFIG_PANIC_ON_OOPS',
     'CONFIG_PANIC_ON_SSR_NOTIF_TIMEOUT',
     'CONFIG_QCOM_FORCE_WDOG_BITE_ON_PANIC',
-    # ★ 2026-10-03 关键:sde59 现场抓到"模块 init 里 request_firmware → 落到用户态回退 →
-    #   而 init 正卡在等 vendor_modprobe ⇒ 循环等待 ⇒ module_mutex 被永久占住"。
-    #   关掉用户态回退后:直接读 /vendor/firmware 失败就【立刻失败】,该模块快速退出,
-    #   module_mutex 释放 ⇒ 显示(msm_drm)/触摸/电池等 29 个模块才能装上。
-    'CONFIG_FW_LOADER_USER_HELPER_FALLBACK',
+    # ⚠️ 2026-10-03:曾把 CONFIG_FW_LOADER_USER_HELPER_FALLBACK 关掉(想让读不到固件的模块
+    #   快速失败,拆掉"模块init↔用户态"的循环等待),但实测那版内核【启动前就死】(连 logdump
+    #   记录都没写),而 FALLBACK=y 的 c4fc2d02 能正常跑到 50s 以上。⇒ 已回退。
+    #   循环等待改用【把固件回退超时 60s 改小】的方式解决(见 patches/fw-timeout.py)。
 )
 
 # ★★ 2026-10-02:整项彻底关掉(无论原厂是 =y 还是 =m)。
