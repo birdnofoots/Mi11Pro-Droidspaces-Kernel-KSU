@@ -75,7 +75,7 @@ DISABLE = (
 #    所以把树内 CNSS2 一并关掉。设备 /vendor 里那个“原厂 cnss2.ko”仍在,
 #    init 会去装它,但它同样找不到这些符号 ⇒ 立刻 "Unknown symbol" 失败退出
 #    (而不是卡在 init 里死占 module_mutex),其余驱动即可正常装载。
-KILL = ('CONFIG_CNSS2',)
+KILL = ()   # ★ 2026-10-02 22:5x 实测:关掉 CONFIG_CNSS2 会让内核启动前就复位 ⇒ 清空,改用别的办法
 
 lines = open(path).read().splitlines()
 out, flipped, kept, killed = [], [], [], []
