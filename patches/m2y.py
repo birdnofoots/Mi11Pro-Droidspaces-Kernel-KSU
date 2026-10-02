@@ -20,12 +20,29 @@
 
 用法: m2y.py [defconfig 路径]
 """
+import os
 import re
 import sys
 
 path = sys.argv[1] if len(sys.argv) > 1 else \
     'arch/arm64/configs/vendor/mars_qgki_ds_defconfig'
 KEEP = ('CONFIG_ICNSS2', 'CONFIG_CNSS2', 'CONFIG_MEDIA_TUNER_')
+
+# ★ 2026-10-02 新增开关:M2Y_NOFLIP=1 ⇒ 【不把 =m 翻成 =y】,只做 DISABLE。
+#   原因(实测,决定性证据在 sde59 logdump):
+#     star-stock 把 62 个 =m 翻成 =y,但设备 /vendor/lib/modules 里【同名 .ko 仍在】,
+#     Android init 照旧 modprobe 它们 ⇒ 内核日志出现
+#       "Driver 'qcom_llcc_perfmon' is already registered, aborting"
+#       "Driver 'stmvl53l5' is already registered, aborting"
+#       "Driver 'qcom,sn-nci' is already registered, aborting"
+#     最后 WLAN 栈卡死:uptime 129.3s 处
+#       init: Sending signal 9 to service 'exec 24 (/vendor/bin/modprobe -a -d
+#             /vendor/lib/modules/ qca_cld3_wlan qca_cld3_qca6390)'
+#     ⇒ init 超时 SIGKILL 之后整个系统停住 ⇒ bootloader 判失败 ⇒ fastboot/回退。
+#   而原厂 config 原样的 star-ds 之所以"能开机"(但触摸/电池/WLAN 全废),
+#   是因为那些 vendor .ko 加载失败得【很快】,不卡。
+#   ⇒ 正确做法:保持 =m(让 /vendor 的原厂 .ko 去装),不要内建。
+NOFLIP = os.environ.get('M2Y_NOFLIP', '').strip().lower() not in ('', '0', 'no', 'false')
 
 # ★★ 必须关掉的原厂开关
 #    ★ 2026-10-02 重要修正:原来这里列了 27 个"小米/高通私有 debug/回收/HW 抽象"
@@ -63,7 +80,7 @@ for line in lines:
         killed.append('CONFIG_' + my.group(1))
         seen.add('CONFIG_' + my.group(1))
         continue
-    if m and not any(m.group(1).startswith(k) for k in KEEP):
+    if m and not NOFLIP and not any(m.group(1).startswith(k) for k in KEEP):
         out.append(m.group(1) + '=y')
         flipped.append(m.group(1))
     else:
@@ -77,8 +94,9 @@ for opt in DISABLE:
         killed.append(opt)
 open(path, 'w').write('\n'.join(out) + '\n')
 
-print('m2y: 翻成内建 %d 项,保持模块 %d 项,关掉私有开关 %d 项'
-      % (len(flipped), len(kept), len(killed)))
+print('m2y: 翻成内建 %d 项,保持模块 %d 项,关掉私有开关 %d 项%s'
+      % (len(flipped), len(kept), len(killed),
+         '  [NOFLIP:按原厂保持 =m]' if NOFLIP else ''))
 print('  翻成内建: ' + ', '.join(flipped))
 print('  保持模块: ' + ', '.join(kept))
 print('  关掉: ' + ', '.join(killed))
