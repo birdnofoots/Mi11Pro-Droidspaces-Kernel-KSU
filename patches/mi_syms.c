@@ -42,12 +42,18 @@ EXPORT_SYMBOL(power_debug_print_enabled);
 /*
  * 原型未知 → 用 (void) 定义:ARM64 调用约定下实参留在寄存器里,
  * 被调方不读即无副作用;返回 0 表示"不干预"。
+ *
+ * ★ 只有 MIUI 私有框架(CONFIG_OEM_KERNEL)不在时,才需要这些桩:
+ *   一旦恢复 OEM_KERNEL 等私有开关,真实现就回来了,这里必须让位,
+ *   否则会【重复定义】导致编译失败。
  */
+#if !IS_ENABLED(CONFIG_OEM_KERNEL)
 int mi_power_save_battery_cave(void)
 {
 	return 0;
 }
 EXPORT_SYMBOL(mi_power_save_battery_cave);
+#endif
 
 /* ── WLAN:qca_cld3_wlan.ko 需要 ─────────────────────────────────── */
 #if !IS_ENABLED(CONFIG_REFCOUNT_FULL)
@@ -58,7 +64,10 @@ void refcount_warn_saturate(void *r, int t)
 EXPORT_SYMBOL(refcount_warn_saturate);
 #endif
 
-/* ── 显示:msm_drm.ko 需要 ───────────────────────────────────────── */
+/* ── 显示:msm_drm.ko 需要 ─────────────────────────────────────────
+ *    同上:只有 MIUI 私有框架不在时才需要打桩。
+ */
+#if !IS_ENABLED(CONFIG_OEM_KERNEL)
 int mi_display_pm_suspend_callback_set(void)
 {
 	return 0;
@@ -103,3 +112,4 @@ int mhi_force_reset(void)
 	return 0;
 }
 EXPORT_SYMBOL(mhi_force_reset);
+#endif /* !IS_ENABLED(CONFIG_OEM_KERNEL) */
