@@ -865,9 +865,18 @@ static int logdump_thread_fn(void *data)
 	while (!kthread_should_stop()) {
 		logdump_once();
 		/* 心跳:每 10 轮(≈5 秒)在日志里留一行,便于判断"内核还活着" */
-		if ((logdump_count % 10) == 0)
+		if ((logdump_count % 10) == 0) {
 			pr_info("logdump: 心跳 #%u uptime=%llums\n",
 				logdump_count, logdump_uptime_ms());
+			/*
+			 * ★★ v4.12:心跳顺便打一帧【模块表状态】。
+			 *   2026-10-03 实测:内核在 ~15.6s 硬卡死(看门狗复位),
+			 *   卡死瞬间 logdump 线程也跑不动 ⇒ 靠"日志停涨"触发的任务转储
+			 *   根本来不及写。每 5 秒一帧模块状态,至少能看到最后一帧里
+			 *   哪些模块 LIVE、哪些 COMING/UNFORMED。
+			 */
+			moddbg_dump();
+		}
 		/*
 		 * ★ 每 50 轮(≈5~25 秒)打印一次【已加载模块列表】:
 		 *   排查"模块到底装上没有"时,内核 WARN dump 不一定发生,
