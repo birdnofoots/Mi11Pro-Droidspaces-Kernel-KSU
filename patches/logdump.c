@@ -279,19 +279,27 @@ static void logdump_set_permissive(void)
 	}
 }
 
+/*
+ * v4.10:采集脚本改成把结果【写进 /dev/kmsg】。
+ *   旧版写 /data/local/tmp/dbg —— init 卡在 early-init 时 /data 根本没挂,
+ *   什么都拿不到。写 kmsg 则会被 logdump 自己采集落盘。
+ *   重点:/proc/modules(能显示 COMING=Loading 的模块)
+ *        /proc/<pid>/stack(每个 modprobe/kworker 的完整内核栈,不受 512KB 截断影响)
+ */
 static const char *logdump_helper_cmd =
-	"mkdir -p /data/local/tmp/dbg; "
-	"i=0; while [ ! -S /dev/socket/logdr ] && [ $i -lt 40 ]; do sleep 1; i=$((i+1)); done; "
-	"/system/bin/logcat -b all -v threadtime -f /data/local/tmp/dbg/logcat.txt -r 4096 -n 8 & "
-	"/system/bin/logcat -b all -v threadtime "
-	"-s libEGL:V Adreno:V SurfaceFlinger:V gralloc:V OpenGLRenderer:V "
-	"libgsl:V vulkan:V Composer:V hwcomposer:V > /dev/kmsg 2>&1 & "
-	"{ echo === state ===; date; id; getenforce; cat /proc/cmdline; "
-	"ls -la /dev/kgsl-3d0 /dev/ion /dev/dri/ /dev/socket/logdr 2>&1; "
-	"ls /sys/class/kgsl/kgsl-3d0/ 2>&1 | head -40; "
-	"cat /sys/class/kgsl/kgsl-3d0/gpu_model 2>&1; "
-	"cat /proc/modules 2>&1 | head -60; dmesg 2>&1 | tail -80; } "
-	"> /data/local/tmp/dbg/state.txt 2>&1; echo done > /data/local/tmp/dbg/OK";
+	"L(){ printf 'KDBG %s\\n' \"$1\" > /dev/kmsg 2>/dev/null; }; "
+	"L '=== MODULES(/proc/modules) ==='; "
+	"cat /proc/modules 2>&1 | while IFS= read -r l; do L \"$l\"; done; "
+	"L '=== TASK STACKS ==='; "
+	"for p in /proc/[0-9]*; do "
+	  "c=$(cat $p/comm 2>/dev/null) || continue; "
+	  "case \"$c\" in "
+	    "modprobe|vendor_modprobe|init|ueventd|logd|surfaceflinger|kworker*) "
+	      "L \"--- ${p#/proc/} $c $(grep -m2 -E '^(Name|State):' $p/status 2>/dev/null | tr '\\n' ' ') wchan=$(cat $p/wchan 2>/dev/null)\"; "
+	      "cat $p/stack 2>/dev/null | while IFS= read -r l; do L \"$l\"; done ;; "
+	  "esac; "
+	"done; "
+	"L '=== HELPER DONE ==='";
 
 static void logdump_spawn_userspace(void)
 {
