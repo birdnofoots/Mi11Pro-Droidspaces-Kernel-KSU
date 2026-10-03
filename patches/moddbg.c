@@ -1,4 +1,8 @@
 /* ==== v4.10 logdump 诊断钩子(CI 追加到 kernel/module.c 末尾) ==== */
+#include <linux/atomic.h>
+#include <linux/sched.h>
+#include <linux/rculist.h>
+
 struct task_struct *moddbg_mutex_owner(void)
 {
 	unsigned long raw = (unsigned long)atomic_long_read(&module_mutex.owner);
