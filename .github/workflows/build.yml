@@ -833,6 +833,38 @@ jobs:
           print('  本树 y 而原厂非 y: %d 项'%sum(1 for k,v in b.items() if v=='y' and a.get(k)!='y'))
           PY
 
+      # ── ★★★ 根因修复:struct module 必须与原厂逐字段一致 ──────────
+      #   kernel/trace/Kconfig 里:
+      #     config FTRACE_MCOUNT_RECORD { def_bool y; depends on DYNAMIC_FTRACE }
+      #   GKI 片段合并会把 DYNAMIC_FTRACE 打开(它 default y)⇒ struct module 多了
+      #     unsigned int num_ftrace_callsites; unsigned long *ftrace_callsites;
+      #   把其后的 source_list/target_list/exit/refcnt 全部顶偏 16 字节。
+      #   vendor .ko 内嵌的 struct module 是按【原厂布局】编的,而 MODVERSIONS=n
+      #   又关掉了唯一能拦住它的 module_layout 校验 ⇒ 内核按错误偏移读写原厂模块的
+      #   引用计数/依赖链表 ⇒ modprobe 永久卡在 module_mutex/module_wq。
+      #   证据:faddr2line load_module+0x75c = add_unformed_module:3733,
+      #         do_init_module+0xbc = do_init_module:3655(sde59 logdump 现场)。
+      #   原厂 /proc/config.gz:DYNAMIC_FTRACE / FTRACE_MCOUNT_RECORD 均未设置。
+      - name: ★ 关闭 DYNAMIC_FTRACE(修 struct module ABI 偏移)
+        run: |
+          cd kernel
+          ./scripts/config --file out/.config \
+            -d DYNAMIC_FTRACE -d DYNAMIC_FTRACE_WITH_REGS -d FTRACE_MCOUNT_RECORD
+          make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} olddefconfig
+          echo "=== struct module 布局相关开关 ==="
+          for c in FUNCTION_TRACER DYNAMIC_FTRACE FTRACE_MCOUNT_RECORD FUNCTION_ERROR_INJECTION \
+                   FTRACE TRACING EVENT_TRACING JUMP_LABEL BPF_EVENTS MODULE_UNLOAD CONSTRUCTORS \
+                   LIVEPATCH CFI_CLANG KALLSYMS SMP TRACEPOINTS TREE_SRCU SYSFS GENERIC_BUG; do
+            printf '  %-30s %s\n' "$c" "$(grep -m1 "^CONFIG_${c}=" out/.config || grep -m1 "^# CONFIG_${c} is not set" out/.config || echo '(不在本树)')"
+          done
+          if grep -q "^CONFIG_FTRACE_MCOUNT_RECORD=y" out/.config; then
+            echo "::error::FTRACE_MCOUNT_RECORD 仍为 y ⇒ struct module 偏移仍与原厂不一致"; exit 1
+          fi
+          if ! grep -q "^CONFIG_FUNCTION_ERROR_INJECTION=y" out/.config; then
+            echo "::error::FUNCTION_ERROR_INJECTION 被关掉 ⇒ struct module 尾部字段与原厂不一致"; exit 1
+          fi
+          echo "✅ FTRACE_MCOUNT_RECORD 已关,FUNCTION_ERROR_INJECTION 保留"
+
       # ── 编译 ──────────────────────────────────────────────────
       - name: 编译
         run: |
