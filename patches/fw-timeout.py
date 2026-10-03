@@ -32,7 +32,7 @@ import sys
 
 root = sys.argv[1] if len(sys.argv) > 1 else "."
 d = os.path.join(root, "drivers/base/firmware_loader")
-NEW = 5
+NEW = 2
 
 if not os.path.isdir(d):
     print("fw-timeout: 找不到 %s —— 跳过" % d)
