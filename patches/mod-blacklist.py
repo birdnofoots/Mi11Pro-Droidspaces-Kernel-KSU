@@ -33,7 +33,7 @@ static bool mars_module_blocked(const char *name)
 '''
 
 # inject helper before load_module
-pat = re.compile(r"\n((static\s+)?(long|int|unsigned long)\s+load_module\s*\()", s)
+pat = re.compile(r"\n((static\s+)?(long|int|unsigned long)\s+load_module\s*\()")
 m = pat.search(s)
 if not m:
     print("mod-blacklist: load_module not found"); sys.exit(1)
