@@ -73,12 +73,13 @@
 #define LOGDUMP_DEV_PART	59	/* /dev/block/sde59 = by-name/logdump,64MB */
 
 #define LOGDUMP_LOG_OFFSET	(0ULL)			/* 日志本体 */
-#define LOGDUMP_STAT_OFFSET	(2ULL * 1024 * 1024)	/* 状态记录 */
+#define LOGDUMP_STAT_OFFSET	(8ULL * 1024 * 1024)	/* 状态记录(v4.10:2MB→8MB,给 2MB 正文让位) */
 
 /* ── 缓冲布局 ───────────────────────────────────────────────────────── */
 #define LOGDUMP_STATUS_MAX	4096			/* 状态记录用 1 页 */
 #define LOGDUMP_HDR_MAX		512			/* 日志头 */
-#define LOGDUMP_TEXT_MAX	(512 * 1024)		/* 正文上限 512KB(周期 500ms,足够覆盖早期) */
+/* v4.10:正文上限提到整条 ring(2MB),保住早期 init/modprobe 那几行 */
+#define LOGDUMP_TEXT_MAX	(2 * 1024 * 1024)
 
 #define LOGDUMP_BUF_SIZE	(LOGDUMP_STATUS_MAX + LOGDUMP_HDR_MAX + LOGDUMP_TEXT_MAX)
 #define LOGDUMP_OFF_HDR		LOGDUMP_STATUS_MAX
@@ -188,6 +189,10 @@ static bool			 logdump_boot_done;	/* 见到 "Boot completed" */
 static bool			 logdump_auto_fb_done;	/* 已经触发过自动进 fastboot */
 static bool			 logdump_early_done;	/* 早期快照已写 */
 static bool			 logdump_snap2_done;	/* 55s 现场快照已写 */
+static bool			 logdump_statedump_done;	/* v4.10:任务转储只做一次 */
+/* v4.10 诊断:由 kernel/module.c 追加的调试钩子 */
+extern struct task_struct	*moddbg_mutex_owner(void);
+extern void			 moddbg_dump(void);
 static int			 logdump_sf_crashes;
 static size_t			 logdump_sf_scan_off;	/* v4.8:已统计过的正文长度 */
 static bool			 logdump_first_ok;
@@ -575,10 +580,12 @@ static int logdump_write_log(char *buf, size_t text_off, size_t len, u32 seq,
 	ret = logdump_write(LOGDUMP_LOG_OFFSET, h, total);
 	/* ★ 开机早期快照(6s):保住 init 服务启动那几行,刷回原厂后仍可读 */
 	if (!logdump_early_done && logdump_uptime_ms() >= LOGDUMP_EARLY_MS) {
-		logdump_early_done = true;
-		if (!logdump_write(LOGDUMP_EARLY_OFFSET, h, total))
-			pr_emerg("logdump: 已写入开机早期快照(%dms, 32MB 偏移)\n",
-				 LOGDUMP_EARLY_MS);
+		/* v4.10:写成功才置位;失败下一轮重试(否则 6s 现场永远丢) */
+		if (!logdump_write(LOGDUMP_EARLY_OFFSET, h, total)) {
+			logdump_early_done = true;
+			pr_emerg("logdump: 已写入开机早期快照(%llums, 32MB 偏移)\n",
+				 (unsigned long long)logdump_uptime_ms());
+		}
 	}
 	/* ★ 卡死瞬间(≥55s)把同一份正文另存到 32MB,刷回原厂后仍能读回现场 */
 	if (!logdump_snap2_done && logdump_uptime_ms() >= LOGDUMP_SNAP2_MS) {
@@ -699,10 +706,31 @@ static void logdump_check_stuck(void)
 		return;
 	if (now - logdump_last_dump_ms < 2000)
 		return;
+	/* v4.10:任务转储只做一次 —— 反复转储会把 ring 冲爆,早期日志就没了 */
+	if (logdump_statedump_done)
+		return;
 
 	logdump_last_dump_ms = now;
+	logdump_statedump_done = true;
 	pr_emerg("logdump: 日志已 %llums 无增长(len=%zu, uptime=%llums)⇒ Dump 全部任务状态\n",
 		 now - logdump_len_same_since_ms, logdump_prev_len, now);
+	/*
+	 * v4.10 诊断:先打印 module_mutex 持有者与所有模块状态。
+	 * 模块加载死锁时,这是唯一能直接指出"谁拿着锁/谁卡在 COMING"的信息。
+	 */
+	{
+		struct task_struct *o = moddbg_mutex_owner();
+
+		/* 防御:owner 低位已被 mask,但若是野指针就别解引用 */
+		if ((unsigned long)o < 0xffff000000000000UL)
+			o = NULL;
+		pr_emerg("MODDBG: module_mutex owner=%px comm=%s pid=%d state=%ld\n",
+			 o, o ? o->comm : "-", o ? task_pid_nr(o) : 0,
+			 o ? (long)o->state : 0L);
+		if (o)
+			sched_show_task(o);
+	}
+	moddbg_dump();
 	show_state_filter(0);
 }
 
