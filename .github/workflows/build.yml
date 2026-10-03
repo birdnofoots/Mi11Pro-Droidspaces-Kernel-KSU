@@ -440,39 +440,12 @@ jobs:
         run: |
           cd kernel
           if grep -q moddbg_dump kernel/module.c; then
-            echo "已存在,跳过"; exit 0
+            echo "已存在,跳过"
+          else
+            cat ../patches/moddbg.c >> kernel/module.c
+            echo "已追加诊断钩子"
           fi
-          cat >> kernel/module.c <<'EOF'
-
-/* ==== v4.10 logdump 诊断钩子(CI 追加) ==== */
-struct task_struct *moddbg_mutex_owner(void)
-{
-	unsigned long raw = (unsigned long)atomic_long_read(&module_mutex.owner);
-
-	return (struct task_struct *)(raw & ~7UL);
-}
-
-void moddbg_dump(void)
-{
-	struct module *mod;
-
-	pr_emerg("MODDBG: ---- 模块表(state 0=UNFORMED 1=COMING 2=LIVE 3=GOING) ----\n");
-	if (!mutex_trylock(&module_mutex)) {
-		pr_emerg("MODDBG: module_mutex 被占,无法列举模块\n");
-		return;
-	}
-	rcu_read_lock();
-	list_for_each_entry_rcu(mod, &modules, list)
-		pr_emerg("MODDBG: %-28s state=%d ref=%d size=%u\n",
-			 mod->name, mod->state, atomic_read(&mod->refcnt),
-			 mod->core_layout.size);
-	rcu_read_unlock();
-	mutex_unlock(&module_mutex);
-	pr_emerg("MODDBG: ---- 模块表结束 ----\n");
-}
-EOF
           grep -n "moddbg_dump\|moddbg_mutex_owner" kernel/module.c | head -5
-          echo "已追加诊断钩子"
 
       # ── MIUI 私有符号桩:让原厂 vendor .ko 能装进来 ──────────────
       #    vermagic/MODVERSIONS 解决后,剩下的失败模块缺的是 MIUI 私有符号
