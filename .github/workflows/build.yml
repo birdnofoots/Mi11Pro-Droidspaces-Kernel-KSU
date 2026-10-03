@@ -534,21 +534,18 @@ jobs:
       #     · 回退超时 60s→5s 之后,凡是走"用户态回退"的固件(GPU/ADSP/WLAN/触摸)
       #       都更容易超时失败 ⇒ 桌面永远起不来 ⇒ 停在 LOGO 阶段等看门狗。
       #   ⇒ 恢复原厂值。若将来确实需要改小,必须先用 cmdline 二分验证。
-      - name: ★ 固件回退超时保持原厂(不再改小)
+      - name: ★ 应用 fw-timeout.py（固件回退超时 60→2 秒）
         run: |
           cd kernel
+          # GPU(A660) 固件已 CONFIG_EXTRA_FIRMWARE 内嵌,不走用户态回退。
+          # 但 vendor 触摸/WLAN 等模块的 request_firmware 会卡住 vendor_modprobe
+          # 的 exec ⇒ init 等 52s ⇒ 关机。2 秒快速失败 ⇒ 锁释放,其余模块可装。
+          python3 ../patches/fw-timeout.py .
           F=drivers/base/firmware_loader/fallback_table.c
-          echo "=== 当前值与源码 ==="
-          grep -nE "loading_timeout|old_timeout" "$F" | head -10
-          if grep -qE "\.loading_timeout[[:space:]]*=[[:space:]]*5\b" "$F"; then
-            echo "⚠️ 检测到 5 秒的改动,回滚成原厂 60 秒"
-            sed -i -E 's/(\.loading_timeout[[:space:]]*=[[:space:]]*)5\b/\160/' "$F"
-          fi
-          grep -nE "\.loading_timeout|\.old_timeout" "$F" | head -5
-          if grep -qE "\.loading_timeout[[:space:]]*=[[:space:]]*5\b" "$F"; then
-            echo "::error::固件回退超时仍是 5 秒(会拖垮启动)"; exit 1
-          fi
-          echo "✅ 固件回退超时 = 原厂默认(60s)"
+          grep -nE "loading_timeout|old_timeout" "$F" | head -5
+          grep -qE "\.loading_timeout[[:space:]]*=[[:space:]]*2\b" "$F" \
+            || { echo "::error::fw-timeout 未生效"; exit 1; }
+          echo "✅ 固件回退超时 = 2s"
 
       # ── 取消导出 RDDM MHI 符号:⚠️ 2026-10-02 实测【会让内核启动前就复位】──
       #    (f932d6a8 那版 + KILL CONFIG_CNSS2 一起上,结果 3~4 秒一轮的 LOGO↔黑屏循环,
