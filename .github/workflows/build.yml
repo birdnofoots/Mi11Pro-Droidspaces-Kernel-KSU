@@ -982,8 +982,16 @@ jobs:
             -d DYNAMIC_FTRACE -d DYNAMIC_FTRACE_WITH_REGS -d FTRACE_MCOUNT_RECORD \
             -e DETECT_HUNG_TASK -d BOOTPARAM_HUNG_TASK_PANIC --set-val DEFAULT_HUNG_TASK_TIMEOUT 15 \
             -e MAC80211 -d CFG80211_WEXT -d MAC80211_LEDS -d MAC80211_MESH \
-            -e MACVLAN -e IPVLAN -e VXLAN -e NF_TABLES -e NF_NAT -e IP_NF_NAT
+            -e MACVLAN -e IPVLAN -e VXLAN -e NF_TABLES -e NF_NAT -e IP_NF_NAT \
+            -d QTI_BATTERY_CHARGER \
+            -d TOUCHSCREEN_CYPRESS_CYTTSP5 -d TOUCHSCREEN_CYPRESS_CYTTSP5_I2C \
+            -d TOUCHSCREEN_CYPRESS_CYTTSP5_LOADER -d TOUCHSCREEN_CYPRESS_CYTTSP5_DEVICE_ACCESS \
+            -d TOUCHSCREEN_ST_FTS_V521_SPI
           make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} olddefconfig
+          # ★ 关掉树内自带的 触摸/充电 模块:它们 import mi_disp_register_client 等
+          #   43 个被取消导出的符号 ⇒ modpost 报 undefined ✗;而设备上用的是 /vendor 里
+          #   原厂的 cyttsp5*.ko / fts_touch_spi_k2.ko / qti_battery_charger_main.ko
+          #   (通过 modules.dep 保证 msm_drm.ko 先加载 ⇒ 符号从它那里取)⇒ 树内这份多余。
           echo "=== struct module 布局相关开关 ==="
           for c in FUNCTION_TRACER DYNAMIC_FTRACE FTRACE_MCOUNT_RECORD FUNCTION_ERROR_INJECTION \
                    FTRACE TRACING EVENT_TRACING JUMP_LABEL BPF_EVENTS MODULE_UNLOAD CONSTRUCTORS \
