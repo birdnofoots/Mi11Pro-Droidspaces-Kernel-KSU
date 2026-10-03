@@ -936,7 +936,9 @@ jobs:
           cd kernel
           ./scripts/config --file out/.config \
             -d DYNAMIC_FTRACE -d DYNAMIC_FTRACE_WITH_REGS -d FTRACE_MCOUNT_RECORD \
-            -e DETECT_HUNG_TASK -d BOOTPARAM_HUNG_TASK_PANIC --set-val DEFAULT_HUNG_TASK_TIMEOUT 15
+            -e DETECT_HUNG_TASK -d BOOTPARAM_HUNG_TASK_PANIC --set-val DEFAULT_HUNG_TASK_TIMEOUT 15 \
+            -e MAC80211 -d CFG80211_WEXT -d MAC80211_LEDS -d MAC80211_MESH \
+            -e MACVLAN -e IPVLAN -e VXLAN -e NF_TABLES -e NF_NAT -e IP_NF_NAT
           make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} olddefconfig
           echo "=== struct module 布局相关开关 ==="
           for c in FUNCTION_TRACER DYNAMIC_FTRACE FTRACE_MCOUNT_RECORD FUNCTION_ERROR_INJECTION \
@@ -952,6 +954,22 @@ jobs:
             echo "::error::FUNCTION_ERROR_INJECTION 被关掉 ⇒ struct module 尾部字段与原厂不一致"; exit 1
           fi
           echo "✅ FTRACE_MCOUNT_RECORD 已关,FUNCTION_ERROR_INJECTION 保留"
+          echo "=== Droidspaces / WiFi 要件(Droidspaces 需要内建;设备上没有这些厂商 .ko) ==="
+          for c in MAC80211 MACVLAN IPVLAN VXLAN NF_TABLES NF_NAT IP_NF_NAT \
+                   USER_NS PID_NS IPC_NS SYSVIPC POSIX_MQUEUE CGROUP_DEVICE CGROUP_PIDS \
+                   TMPFS_XATTR OVERLAY_FS VETH BRIDGE SECCOMP_FILTER; do
+            v=$(grep -m1 "^CONFIG_${c}=" out/.config | cut -d= -f2)
+            printf '  %-22s %s\n' "$c" "${v:-无}"
+            if [ "$v" != "y" ]; then
+              echo "::error::CONFIG_${c} 必须内建(=y):设备上没有对应厂商 .ko,Droidspaces/WiFi 会缺功能"
+              exit 1
+            fi
+          done
+          if grep -q "^CONFIG_CFG80211_WEXT=y" out/.config; then
+            echo "::error::CFG80211_WEXT 仍为 y ⇒ struct wireless_dev 布局与原厂不一致(vendor WLAN 有风险)"
+            exit 1
+          fi
+          echo "✅ Droidspaces/WiFi 要件齐备,MAC80211 内建,CFG80211_WEXT 已关"
 
       # ── 编译 ──────────────────────────────────────────────────
       - name: 编译
