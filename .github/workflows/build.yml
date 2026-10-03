@@ -701,6 +701,25 @@ jobs:
           echo "=== 复核 ==="
           grep -rn "EXPORT_TRACEPOINT_SYMBOL.*tracing_mark_write" --include=*.c --include=*.h . | grep -v "removed by CI" | head -5 || echo "  ✅ 已无有效导出语句"
 
+      # ── ★★★ v4:不把 techpack 显示驱动编进内核 ──────────────────────
+      #   证据(2026-10-03 v3 现场日志,13.4s):
+      #     msm_drm: module is already loaded      ← 不再是符号冲突,而是【名字被占】
+      #     ⇒ 内核里内建的 techpack 显示驱动注册了 msm_drm(/sys/module/msm_drm 存在)
+      #     ⇒ modprobe 拒装 vendor msm_drm.ko ⇒ 依赖它的 充电/触摸/相机 全装不上
+      #       (13.34s: wait for '/sys/class/power_supply/usb/type' timed out)
+      #   为什么现在能删:之前删了会链接失败(mi_disp_register_client undefined),
+      #     因为树内【自己也编了】cyttsp5/fts/qti_battery_charger 模块 ✗;
+      #     这些模块已在 v3 里关掉 ⇒ 现在整块去掉显示驱动是安全的 ✓
+      - name: ★ v4 不把 techpack 显示驱动编进内核(解 msm_drm 名字被占)
+        run: |
+          cd kernel
+          MF=techpack/display/msm/Makefile
+          test -f "$MF" || { echo "::error::找不到 $MF"; exit 1; }
+          echo "=== 改前 ==="; grep -nE "obj-.*msm_drm\.o" "$MF" || echo "  (无)"
+          sed -i -E 's|^([[:space:]]*obj-[^[:space:]]*[[:space:]]*\+=[[:space:]]*msm_drm\.o.*)$|# disabled by CI (vendor msm_drm.ko owns the display): \1|' "$MF"
+          echo "=== 改后 ==="; grep -nE "msm_drm\.o|disabled by CI" "$MF" | head -3
+          grep -q "disabled by CI" "$MF" || { echo "::error::没能注释掉 msm_drm.o"; exit 1; }
+
       # ── 精确取消内核里与 vendor msm_drm.ko 撞名的导出(43 个) ────────
       #   集合算法:msm_drm.ko 自己的 __ksymtab(53 个导出)∩ 我们内核的导出 = 43 个。
       #   为什么能取消:内建代码互相引用在 vmlinux 链接期解析,不需要 EXPORT_SYMBOL
