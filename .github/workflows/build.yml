@@ -1052,8 +1052,11 @@ jobs:
         run: |
           cd kernel
           set +e
+          # KBUILD_MODPOST_WARN: 树内 camera.ko/cnss2.ko 引用 get_hw_*（已为让 vendor
+          # hwid.ko 装载而取消导出）⇒ modpost 会报 undefined。降级为警告，不阻断构建；
+          # 运行时由 /vendor/hwid.ko 提供这些符号（与 msm_drm 的 43 符号同一策略）。
           /usr/bin/time -v make -k O=out -j"$(nproc)" CC="$CC" LD="$LD" \
-            SUBLEVEL=${SUBLEVEL_OVERRIDE} KCFLAGS=-Wno-error > /tmp/build.log 2>&1
+            SUBLEVEL=${SUBLEVEL_OVERRIDE} KCFLAGS=-Wno-error KBUILD_MODPOST_WARN=1 > /tmp/build.log 2>&1
           rc=$?
           mkdir -p ../artifacts
           cp /tmp/build.log ../artifacts/build.log 2>/dev/null || true
