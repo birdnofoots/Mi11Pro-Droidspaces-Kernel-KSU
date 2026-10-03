@@ -79,7 +79,7 @@
 #define LOGDUMP_STATUS_MAX	4096			/* 状态记录用 1 页 */
 #define LOGDUMP_HDR_MAX		512			/* 日志头 */
 /* v4.10:正文上限提到整条 ring(2MB),保住早期 init/modprobe 那几行 */
-#define LOGDUMP_TEXT_MAX	(2 * 1024 * 1024)
+#define LOGDUMP_TEXT_MAX	(512 * 1024)	/* v4.13:回到 512KB,减轻启动期 I/O */
 
 #define LOGDUMP_BUF_SIZE	(LOGDUMP_STATUS_MAX + LOGDUMP_HDR_MAX + LOGDUMP_TEXT_MAX)
 #define LOGDUMP_OFF_HDR		LOGDUMP_STATUS_MAX
@@ -865,7 +865,7 @@ static int logdump_thread_fn(void *data)
 	while (!kthread_should_stop()) {
 		logdump_once();
 		/* 心跳:每 10 轮(≈5 秒)在日志里留一行,便于判断"内核还活着" */
-		if ((logdump_count % 10) == 0) {
+		if ((logdump_count % 60) == 0) {
 			pr_info("logdump: 心跳 #%u uptime=%llums\n",
 				logdump_count, logdump_uptime_ms());
 			/*
@@ -883,7 +883,7 @@ static int logdump_thread_fn(void *data)
 		 *   而 print_modules() 会把 "Modules linked in: ..." 写进日志,
 		 *   我们的采集就能把它落盘。
 		 */
-		if ((logdump_count % 5) == 0)
+		if ((logdump_count % 100) == 0)   /* v4.13:别再刷屏 */
 			print_modules();
 		/*
 		 * ★★★ v4.7:
@@ -914,8 +914,17 @@ static int logdump_thread_fn(void *data)
 		 */
 		{
 			u64 up = logdump_uptime_ms();
-			msleep(up < 15000 ? 100 :
-			       (up < 180000 ? LOGDUMP_PERIOD_MS : 10000));
+			/*
+			 * ★★ v4.13(2026-10-03):把节奏放松回来。
+			 *   实测教训:前 15 秒每 100ms 写一次(正文上限 2MB)
+			 *   ⇒ 峰值 ~20MB/s 持续写 UFS,且叠加每 2.5s print_modules()
+			 *   + 每 5s 一帧模块表 ⇒ 正好砸在启动期 I/O 最紧张的那 10 秒
+			 *   (zygote/system_server/dex2oat 都在读写)⇒ 卡住 ⇒ 看门狗复位。
+			 *   而更早"能进 MIUI"的版本是 512KB / 500ms。
+			 *   现在:1s / 3s / 30s + 正文 512KB + 转储只在疑似卡死时做一次。
+			 */
+			msleep(up < 15000 ? 1000 :
+			       (up < 180000 ? 3000 : 30000));
 		}
 	}
 	return 0;
