@@ -100,10 +100,25 @@ DISABLE = (
 #    所以把树内 CNSS2 一并关掉。设备 /vendor 里那个“原厂 cnss2.ko”仍在,
 #    init 会去装它,但它同样找不到这些符号 ⇒ 立刻 "Unknown symbol" 失败退出
 #    (而不是卡在 init 里死占 module_mutex),其余驱动即可正常装载。
+# ★★ 2026-10-03:即使 NOFLIP(不翻 =m→=y),这些也必须【强制内建】。
+#   实测:设备 /vendor/lib/modules 里没有它们的 .ko(只有 qca_cld3_*/exfat 等),
+#   而我们自己编的模块不会装到设备上 ⇒ =m 等于没有。
+#   · MAC80211      : 厂商 qca_cld3_wlan.ko 依赖内核内建的 mac80211(原厂就是 =y)
+#   · 下面 6 项     : Droidspaces 容器网络(macvlan/ipvlan/vxlan/nftables/NAT)
+FORCE_Y = (
+    'CONFIG_MAC80211',
+    'CONFIG_MACVLAN',
+    'CONFIG_IPVLAN',
+    'CONFIG_VXLAN',
+    'CONFIG_NF_TABLES',
+    'CONFIG_NF_NAT',
+    'CONFIG_IP_NF_NAT',
+)
+
 KILL = ()   # ★ 2026-10-02 22:5x 实测:关掉 CONFIG_CNSS2 会让内核启动前就复位 ⇒ 清空,改用别的办法
 
 lines = open(path).read().splitlines()
-out, flipped, kept, killed = [], [], [], []
+out, flipped, kept, killed, forced = [], [], [], [], []
 seen = set()
 for line in lines:
     m = re.match(r'^(CONFIG_[A-Za-z0-9_]+)=m$', line)
@@ -119,6 +134,10 @@ for line in lines:
         killed.append('CONFIG_' + my.group(1))
         seen.add('CONFIG_' + my.group(1))
         continue
+    if m and m.group(1) in FORCE_Y:
+        out.append(m.group(1) + '=y')
+        forced.append(m.group(1))
+        continue
     if m and not NOFLIP and not any(m.group(1).startswith(k) for k in KEEP):
         out.append(m.group(1) + '=y')
         flipped.append(m.group(1))
@@ -133,6 +152,7 @@ for opt in DISABLE:
         killed.append(opt)
 open(path, 'w').write('\n'.join(out) + '\n')
 
+print('m2y: 强制内建 %d 项: %s' % (len(forced), ', '.join(forced)))
 print('m2y: 翻成内建 %d 项,保持模块 %d 项,关掉私有开关 %d 项%s'
       % (len(flipped), len(kept), len(killed),
          '  [NOFLIP:按原厂保持 =m]' if NOFLIP else ''))
