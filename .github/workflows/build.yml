@@ -871,6 +871,43 @@ jobs:
           fi
           ls -la ../artifacts
 
+      # ── 诊断: 把 load_module 里的卡点偏移反查成源码行 ──────────
+      - name: 诊断 load_module 卡点(addr2line)
+        if: always()
+        run: |
+          cd kernel
+          set +e
+          V=out/vmlinux
+          mkdir -p ../artifacts
+          {
+          echo "=== vmlinux ==="; ls -l "$V" 2>/dev/null
+          NM=""; for t in "${CROSS_COMPILE}nm" llvm-nm nm; do command -v "$t" >/dev/null 2>&1 && { NM="$t"; break; }; done
+          A2L=""; for t in "${CROSS_COMPILE}addr2line" llvm-addr2line addr2line; do command -v "$t" >/dev/null 2>&1 && { A2L="$t"; break; }; done
+          echo "NM=$NM A2L=$A2L"
+          echo "=== 关键符号 ==="
+          "$NM" -n "$V" 2>/dev/null | grep -E " (load_module|do_init_module|add_unformed_module|simplify_symbols|resolve_symbol|check_version|layout_and_allocate|move_module|module_alloc|complete_formation|elf_validity_check|check_modinfo|copy_module_from_fd|__arm64_sys_finit_module)$"
+          echo "=== faddr2line ==="
+          for spec in load_module+0x75c load_module+0x1de4 load_module+0x31d8 do_init_module+0xbc; do
+            echo "--- $spec ---"
+            ./scripts/faddr2line "$V" "$spec" 2>&1 | head -25
+          done
+          echo "=== load_module 0x6c0..0x880 逐 4 字节 → 源码行 ==="
+          LM=$("$NM" -n "$V" 2>/dev/null | awk '$3=="load_module"{print $1; exit}')
+          echo "load_module=0x$LM"
+          if [ -n "$LM" ] && [ -n "$A2L" ]; then
+            ADDRS=""; OFFS=""; n=1728
+            while [ "$n" -le 2176 ]; do
+              ADDRS="$ADDRS $(printf '0x%x' $((0x$LM + n)))"
+              OFFS="$OFFS $(printf '0x%x' $n)"
+              n=$((n + 4))
+            done
+            "$A2L" -f -e "$V" $ADDRS > /tmp/a2l.txt 2>/dev/null
+            awk 'NR%2==1{fn=$0;next}{print fn"    "$0}' /tmp/a2l.txt > /tmp/a2l-pairs.txt
+            paste -d'|' <(printf '%s\n' $OFFS) /tmp/a2l-pairs.txt
+          fi
+          echo "=== 完 ==="
+          } 2>&1 | tee ../artifacts/DIAG-loadmodule.txt
+
       - name: kABI CRC 对照(决定原厂模块能否加载)
         run: |
           cd kernel
