@@ -523,10 +523,32 @@ jobs:
       #      模块全装不上(症状:无显示、无 WiFi)。
       #    ⇒ 只把回退超时改小(机制保留):5 秒等不到就放弃 ⇒ 模块快速失败
       #      ⇒ 锁释放 ⇒ 其余模块正常装载。详见 patches/fw-timeout.py。
-      - name: 固件回退超时改小(60s→5s)
+      # ── ⛔ 固件回退超时【保持原厂 60 秒】,不再改成 5 秒 ──────────────
+      #   2026-10-03 复盘:这一改是"卡在 LOGO+小绿人"的最大嫌疑 ✗
+      #   证据链:
+      #     · TAKEOVER.md §70(2026-10-02 18:42)记录过 star-stock-raw 之前身
+      #       【boot_completed=1,35.5 秒进系统,稳定 3 分 10 秒】,只有 WiFi 不通;
+      #       当时的构建【没有】fw-timeout。
+      #     · 本 workflow 自己的注释早就写过:GPU 固件加载失败 ⇒
+      #       surfaceflinger 报 "no suitable EGLConfig found" 自杀 ⇒ 起不到桌面。
+      #     · 回退超时 60s→5s 之后,凡是走"用户态回退"的固件(GPU/ADSP/WLAN/触摸)
+      #       都更容易超时失败 ⇒ 桌面永远起不来 ⇒ 停在 LOGO 阶段等看门狗。
+      #   ⇒ 恢复原厂值。若将来确实需要改小,必须先用 cmdline 二分验证。
+      - name: ★ 固件回退超时保持原厂(不再改小)
         run: |
           cd kernel
-          python3 ../patches/fw-timeout.py .
+          F=drivers/base/firmware_loader/fallback_table.c
+          echo "=== 当前值与源码 ==="
+          grep -nE "loading_timeout|old_timeout" "$F" | head -10
+          if grep -qE "\.loading_timeout[[:space:]]*=[[:space:]]*5\b" "$F"; then
+            echo "⚠️ 检测到 5 秒的改动,回滚成原厂 60 秒"
+            sed -i -E 's/(\.loading_timeout[[:space:]]*=[[:space:]]*)5\b/\160/' "$F"
+          fi
+          grep -nE "\.loading_timeout|\.old_timeout" "$F" | head -5
+          if grep -qE "\.loading_timeout[[:space:]]*=[[:space:]]*5\b" "$F"; then
+            echo "::error::固件回退超时仍是 5 秒(会拖垮启动)"; exit 1
+          fi
+          echo "✅ 固件回退超时 = 原厂默认(60s)"
 
       # ── 取消导出 RDDM MHI 符号:⚠️ 2026-10-02 实测【会让内核启动前就复位】──
       #    (f932d6a8 那版 + KILL CONFIG_CNSS2 一起上,结果 3~4 秒一轮的 LOGO↔黑屏循环,
