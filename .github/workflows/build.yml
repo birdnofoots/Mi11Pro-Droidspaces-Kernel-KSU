@@ -617,6 +617,68 @@ jobs:
             echo "本树没有 nl80211hdr_put,跳过"
           fi
 
+      # ── 去掉内核里 tracing_mark_write 的导出(解 vendor msm_drm.ko 撞名) ──
+      #   实测日志(2026-10-03,1.42s):
+      #     msm_drm: exports duplicate symbol __tracepoint_tracing_mark_write (owned by kernel)
+      #     init: Failed to insmod '/lib/modules/msm_drm.ko' ...
+      #   techpack/display/msm/Makefile:177 `obj-$(CONFIG_DISPLAY_BUILD) += msm_drm.o`
+      #   ⇒ 显示驱动被编进 vmlinux,它的 EXPORT_TRACEPOINT_SYMBOL(tracing_mark_write)
+      #     与 vendor msm_drm.ko 自己导出的那份撞名;complete_formation 里的
+      #     verify_exported_symbols() 直接把模块拒掉 ⇒ 所有依赖 msm_drm 的原厂模块
+      #     (触摸/充电/相机/LED/热控)连带失败。原厂显示由 vendor 模块驱动:
+      #     readlink /sys/bus/platform/devices/ae00000.qcom,mdss_mdp/driver → msm_drm
+      #   只注释【导出语句】,不动定义与调用;已核对 msm_drm.ko 的导入表里没有该符号。
+      - name: ★ 去 tracing_mark_write 内核导出(解 vendor msm_drm.ko 冲突)
+        run: |
+          cd kernel
+          python3 - <<'PY'
+          import os, re
+          hits = []
+          for root, dirs, files in os.walk('.'):
+              if root.startswith('./out'):
+                  continue
+              for f in files:
+                  if not f.endswith(('.c', '.h')):
+                      continue
+                  p = os.path.join(root, f)
+                  try:
+                      lines = open(p, errors='ignore').read().splitlines()
+                  except Exception:
+                      continue
+                  for i, l in enumerate(lines):
+                      if 'EXPORT_TRACEPOINT_SYMBOL' in l and 'tracing_mark_write' in l:
+                          hits.append((p, i + 1, l.strip()))
+          print('=== 含 EXPORT_TRACEPOINT_SYMBOL + tracing_mark_write 的行 ===')
+          for p, n, l in hits:
+              print('  %s:%d  %s' % (p, n, l))
+          if not hits:
+              print('  (未找到导出语句;列出所有提到 tracing_mark_write 的源文件供排查)')
+              for root, dirs, files in os.walk('.'):
+                  if root.startswith('./out'):
+                      continue
+                  for f in files:
+                      if f.endswith(('.c', '.h')):
+                          p = os.path.join(root, f)
+                          try:
+                              if 'tracing_mark_write' in open(p, errors='ignore').read():
+                                  print('   ', p)
+                          except Exception:
+                              pass
+              raise SystemExit(0)
+          changed = 0
+          for p in sorted({h[0] for h in hits}):
+              s = open(p, errors='ignore').read()
+              s2 = re.sub(r'(?m)^([ \t]*)(EXPORT_TRACEPOINT_SYMBOL[_A-Z0-9]*[ \t]*\([ \t]*tracing_mark_write[ \t]*\)[ \t]*;)',
+                          r'\1/* removed by CI (vendor msm_drm.ko exports it): \2 */', s)
+              if s2 != s:
+                  open(p, 'w').write(s2)
+                  changed += 1
+                  print('  已注释导出: %s' % p)
+          print('共修改 %d 个文件' % changed)
+          PY
+          echo "=== 复核 ==="
+          grep -rn "EXPORT_TRACEPOINT_SYMBOL.*tracing_mark_write" --include=*.c --include=*.h . | grep -v "removed by CI" | head -5 || echo "  ✅ 已无有效导出语句"
+
       # ── KernelSU ──────────────────────────────────────────────
       - name: 集成 KernelSU
         if: matrix.ksu == '1'
@@ -885,6 +947,18 @@ jobs:
             tail -150 /tmp/build.log
             exit 1
           fi
+
+      # ── 断言:tracing_mark_write 不能再由内核导出 ──────────────
+      - name: ★ 断言 tracing_mark_write 已不由内核导出
+        run: |
+          cd kernel
+          test -f out/Module.symvers || { echo "::error::没有 out/Module.symvers"; exit 1; }
+          if grep -qP "\t__tracepoint_tracing_mark_write\t" out/Module.symvers; then
+            echo "::error::内核仍导出 __tracepoint_tracing_mark_write ⇒ vendor msm_drm.ko 会被 verify_exported_symbols 拒绝"
+            grep -P "\t__tracepoint_tracing_mark_write\t" out/Module.symvers
+            exit 1
+          fi
+          echo "✅ __tracepoint_tracing_mark_write 已不由内核导出(vendor msm_drm.ko 可以加载)"
 
       # ── 校验 ──────────────────────────────────────────────────
       - name: 校验产物
