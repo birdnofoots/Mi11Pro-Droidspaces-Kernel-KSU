@@ -123,3 +123,25 @@ EXPORT_SYMBOL(ufs_read_desc_param);
 
 unsigned long memblock_mem_size_in_gb(void) { return 0; }
 EXPORT_SYMBOL(memblock_mem_size_in_gb);
+
+/* ── ★ v5:MIUI 热控(内建 drivers/thermal/thermal_core.c:2080/2103)要用这两个符号 ──
+ *   矛盾点:这两个名字**同时是 vendor msm_drm.ko 的导出**(在 43 个撞名清单里)⇒
+ *          内核【绝对不能导出】它们,否则 msm_drm.ko 会被 verify_exported_symbols 拒装 ✗;
+ *          但内建 thermal 在 vmlinux 链接期又必须能找到符号 ✗。
+ *   解法:**只定义、不导出**(EXPORT_SYMBOL 一个都不加)——
+ *         内建代码链接 ✓,内核导出表里没有它们 ✓,vendor 模块照常提供真实现 ✓。
+ *   语义:返回 0(成功)、忽略参数 ⇒ thermal 收不到显示事件通知,不影响开机 ✓。
+ *   触发背景:v4 去掉内建 techpack 显示驱动后,链接报
+ *          ld.lld: undefined symbol: mi_disp_register_client / _unregister
+ *          >>> referenced by thermal_core.c:2080 / 2103
+ */
+int mi_disp_register_client(void *client)
+{
+	return 0;
+}
+
+int mi_disp_unregister_client(void *client)
+{
+	return 0;
+}
+
