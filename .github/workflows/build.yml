@@ -473,6 +473,19 @@ jobs:
       #    long comb key" → 紧接着 "Synchronizing SCSI cache";
       #    源码:drivers/input/misc/qpnp-power-on.c 的 longpress_kthread()
       #    里 machine_restart(NULL)。原厂内核从不触发。
+      - name: ★ 注入 dummy-psy（早期 power_supply，骗过 init 5s wait）
+        run: |
+          cd kernel
+          if [ -f ../patches/dummy-psy.c ]; then
+            cp ../patches/dummy-psy.c drivers/soc/qcom/dummy_psy.c
+            grep -q 'dummy_psy.o' drivers/soc/qcom/Makefile || echo 'obj-y += dummy_psy.o' >> drivers/soc/qcom/Makefile
+            echo "  已注入 dummy_psy.c"
+            ls -la drivers/soc/qcom/dummy_psy.c
+          else
+            echo "::error::找不到 patches/dummy-psy.c"
+            exit 1
+          fi
+
       - name: 中立化 longpress 重启
         run: |
           cd kernel
