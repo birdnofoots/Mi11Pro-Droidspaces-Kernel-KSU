@@ -486,6 +486,15 @@ jobs:
             exit 1
           fi
 
+      - name: ★ 注入 mod-blacklist（拒绝挂死的 vendor 模块）
+        run: |
+          cd kernel
+          python3 ../patches/mod-blacklist.py .
+          grep -n "mars-module-blacklist" kernel/module.c | head -5
+          grep -q "mars-module-blacklist" kernel/module.c \
+            || { echo "::error::mod-blacklist 未注入"; exit 1; }
+          echo "✅ mod-blacklist 已注入"
+
       - name: 中立化 longpress 重启
         run: |
           cd kernel
