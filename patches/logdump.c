@@ -205,7 +205,10 @@ static bool			 logdump_first_ok;
  *       自己冲进 fastboot,表现为"黑屏 → 小绿人"循环。
  *       调试期需要时用 cmdline logdump.logdump_auto_fastboot=1 打开。
  */
-static bool			 logdump_auto_fastboot = true;   /* ★ 诊断期:300s 自动回 fastboot */
+static bool			 logdump_auto_fastboot = false;  /* v4.13:默认关!它的成功判据是日志里出现
+								 *   "Boot completed",而 MIUI 内核日志里根本没这字符串
+								 *   ⇒ 开机成功了也会在 300s 被它重启。诊断期用
+								 *   cmdline logdump.logdump_auto_fastboot=1 打开。 */
 module_param(logdump_auto_fastboot, bool, 0644);
 /*
  * ★★ 关键:块设备的【逻辑块大小】。UFS 上是 4096(实测
