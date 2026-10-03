@@ -103,6 +103,18 @@
  */
 #define LOGDUMP_BOOT_TIMEOUT_MS	300000
 /*
+ * ★ 2026-10-03 诊断:【开机早期快照】。
+ *   现场(sde59):init 在 ~2.3s 启动一个 exec 服务后一直等到 295s
+ *   (init: Exec service is hung? Waited 292.817 without SIGCHLD),
+ *   导致 post-fs-data/surfaceflinger/显示全部排在后面 ⇒ 画面永远停在引导器 splash。
+ *   而内核环形缓冲只有 256KB(log_buf_len=256K),开机早期的 init 服务启动行
+ *   在几十秒后就被冲掉了 ⇒ 读不到"卡在哪个服务"。
+ *   做法:在 uptime 到 LOGDUMP_EARLY_MS 时,把当前正文另存一份到 32MB 偏移
+ *   (原厂 logdump 只写开头,刷回原厂后这份快照仍在,可 dd 读回)。
+ */
+#define LOGDUMP_EARLY_MS	6000
+#define LOGDUMP_EARLY_OFFSET	(32ULL * 1024 * 1024)
+/*
  * ★ 2026-10-03 诊断用:开箱现场快照 + 自动回 fastboot。
  *   现象:内核能启动但卡在 ~50s(module_mutex 被某个 vendor 模块 init 永久占住,
  *   msm_drm/触摸/电池等 29 个模块全装不上 ⇒ 无显示、无 WiFi)。
@@ -174,6 +186,7 @@ static u64			 logdump_len_same_since_ms;
 static u64			 logdump_last_dump_ms;
 static bool			 logdump_boot_done;	/* 见到 "Boot completed" */
 static bool			 logdump_auto_fb_done;	/* 已经触发过自动进 fastboot */
+static bool			 logdump_early_done;	/* 早期快照已写 */
 static bool			 logdump_snap2_done;	/* 55s 现场快照已写 */
 static int			 logdump_sf_crashes;
 static size_t			 logdump_sf_scan_off;	/* v4.8:已统计过的正文长度 */
@@ -560,6 +573,13 @@ static int logdump_write_log(char *buf, size_t text_off, size_t len, u32 seq,
 		memset(buf + text_off + len, 0, total - LOGDUMP_HDR_MAX - len);
 
 	ret = logdump_write(LOGDUMP_LOG_OFFSET, h, total);
+	/* ★ 开机早期快照(6s):保住 init 服务启动那几行,刷回原厂后仍可读 */
+	if (!logdump_early_done && logdump_uptime_ms() >= LOGDUMP_EARLY_MS) {
+		logdump_early_done = true;
+		if (!logdump_write(LOGDUMP_EARLY_OFFSET, h, total))
+			pr_emerg("logdump: 已写入开机早期快照(%dms, 32MB 偏移)\n",
+				 LOGDUMP_EARLY_MS);
+	}
 	/* ★ 卡死瞬间(≥55s)把同一份正文另存到 32MB,刷回原厂后仍能读回现场 */
 	if (!logdump_snap2_done && logdump_uptime_ms() >= LOGDUMP_SNAP2_MS) {
 		logdump_snap2_done = true;
