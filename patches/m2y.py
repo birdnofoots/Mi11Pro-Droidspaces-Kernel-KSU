@@ -26,7 +26,16 @@ import sys
 
 path = sys.argv[1] if len(sys.argv) > 1 else \
     'arch/arm64/configs/vendor/mars_qgki_ds_defconfig'
-KEEP = ('CONFIG_ICNSS2', 'CONFIG_CNSS2', 'CONFIG_MEDIA_TUNER_')
+KEEP = (
+    'CONFIG_ICNSS2', 'CONFIG_CNSS2', 'CONFIG_MEDIA_TUNER_',
+    # ★ 2026-10-03 P1 根因(sde59 logdump @79s, swapper/0 D-state):
+    #   fts_driver_init → fts_probe → fts_fw_update → getFWdata
+    #     → request_firmware → firmware_fallback_sysfs
+    #     → wait_for_completion_killable_timeout   ← 在 kernel_init 里等用户态喂固件
+    #   内建驱动在 userspace 起来前 probe ⇒ 永远等不到 firmware helper ⇒ 整机卡死。
+    #   保持 =m,让 probe 推迟到模块加载(此时 /vendor/firmware 已可读)。
+    'CONFIG_TOUCHSCREEN_ST_FTS',
+)
 
 # ★ 2026-10-02 新增开关:M2Y_NOFLIP=1 ⇒ 【不把 =m 翻成 =y】,只做 DISABLE。
 #   原因(实测,决定性证据在 sde59 logdump):
