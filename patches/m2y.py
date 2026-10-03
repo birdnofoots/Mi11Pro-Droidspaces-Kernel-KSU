@@ -111,8 +111,12 @@ FORCE_Y = (
     'CONFIG_IPVLAN',
     'CONFIG_VXLAN',
     'CONFIG_NF_TABLES',
+    'CONFIG_NF_TABLES_INET',
+    'CONFIG_NFT_NAT',
     'CONFIG_NF_NAT',
+    'CONFIG_NETFILTER_XT_TARGET_MASQUERADE',
     'CONFIG_IP_NF_NAT',
+    'CONFIG_IP_NF_TARGET_MASQUERADE',
 )
 
 KILL = ()   # ★ 2026-10-02 22:5x 实测:关掉 CONFIG_CNSS2 会让内核启动前就复位 ⇒ 清空,改用别的办法
@@ -134,9 +138,15 @@ for line in lines:
         killed.append('CONFIG_' + my.group(1))
         seen.add('CONFIG_' + my.group(1))
         continue
-    if m and m.group(1) in FORCE_Y:
-        out.append(m.group(1) + '=y')
-        forced.append(m.group(1))
+    mn = re.match(r'^# (CONFIG_[A-Za-z0-9_]+) is not set$', line)
+    cand = None
+    if m:
+        cand = m.group(1)
+    elif mn:
+        cand = mn.group(1)
+    if cand and cand in FORCE_Y:
+        out.append(cand + '=y')
+        forced.append(cand)
         continue
     if m and not NOFLIP and not any(m.group(1).startswith(k) for k in KEEP):
         out.append(m.group(1) + '=y')
