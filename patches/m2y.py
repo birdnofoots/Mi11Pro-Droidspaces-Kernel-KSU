@@ -67,6 +67,27 @@ DISABLE = (
     'CONFIG_PANIC_ON_OOPS',
     'CONFIG_PANIC_ON_SSR_NOTIF_TIMEOUT',
     'CONFIG_QCOM_FORCE_WDOG_BITE_ON_PANIC',
+    # ★★★ 2026-10-03 根因修复(决定性):struct module 必须与原厂逐字段一致 ★★★
+    #   证据(sde59 logdump + CI faddr2line):
+    #     load_module+0x75c   = add_unformed_module  kernel/module.c:3733
+    #     do_init_module+0xbc = do_init_module       kernel/module.c:3655
+    #   现象:7 个 modprobe 永久卡在 module_mutex / module_wq;msm_drm 加载不上;
+    #        cyttsp5/xiaomi_touch/camera/qti_battery_charger/leds_qti_flash/
+    #        mi_thermal_interface/fts_touch_spi_k2 全是 msm_drm 的下游 ⇒ 显示全废。
+    #   原因:kernel/trace/Kconfig 里
+    #          config FTRACE_MCOUNT_RECORD { def_bool y; depends on DYNAMIC_FTRACE }
+    #        我们开了 FUNCTION_TRACER/DYNAMIC_FTRACE ⇒ struct module 里多出
+    #          unsigned int num_ftrace_callsites; unsigned long *ftrace_callsites;
+    #        把其后的 source_list/target_list/exit/refcnt 全部顶偏 16 字节;
+    #        而 vendor .ko 内嵌的 struct module 是按【原厂布局】编译的,
+    #        且 MODVERSIONS=n 关掉了唯一能拦住它的 module_layout 校验
+    #        ⇒ 内核按错误偏移读写原厂模块的引用计数与依赖链表 ⇒ 加载器死锁。
+    #   原厂 /proc/config.gz:FUNCTION_TRACER 未设置、DYNAMIC_FTRACE 未设置。
+    'CONFIG_FUNCTION_TRACER',
+    'CONFIG_DYNAMIC_FTRACE',
+    'CONFIG_FUNCTION_GRAPH_TRACER',
+    'CONFIG_DYNAMIC_FTRACE_WITH_REGS',
+    'CONFIG_FTRACE_MCOUNT_RECORD',
     # ⚠️ 2026-10-03:曾把 CONFIG_FW_LOADER_USER_HELPER_FALLBACK 关掉(想让读不到固件的模块
     #   快速失败,拆掉"模块init↔用户态"的循环等待),但实测那版内核【启动前就死】(连 logdump
     #   记录都没写),而 FALLBACK=y 的 c4fc2d02 能正常跑到 50s 以上。⇒ 已回退。
