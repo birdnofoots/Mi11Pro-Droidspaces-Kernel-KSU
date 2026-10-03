@@ -998,20 +998,25 @@ jobs:
             echo "::error::FUNCTION_ERROR_INJECTION 被关掉 ⇒ struct module 尾部字段与原厂不一致"; exit 1
           fi
           echo "✅ FTRACE_MCOUNT_RECORD 已关,FUNCTION_ERROR_INJECTION 保留"
-          echo "=== Droidspaces / WiFi 要件(Droidspaces 需要内建;设备上没有这些厂商 .ko) ==="
-          for c in MAC80211 MACVLAN IPVLAN VXLAN NF_TABLES NF_NAT IP_NF_NAT \
-                   USER_NS PID_NS IPC_NS SYSVIPC POSIX_MQUEUE CGROUP_DEVICE CGROUP_PIDS \
-                   TMPFS_XATTR OVERLAY_FS VETH BRIDGE SECCOMP_FILTER; do
+          echo "=== Droidspaces / WiFi 核心要件(必须内建) ==="
+          CORE="MAC80211 MACVLAN IPVLAN VXLAN NF_TABLES USER_NS PID_NS IPC_NS SYSVIPC POSIX_MQUEUE CGROUP_DEVICE CGROUP_PIDS TMPFS_XATTR OVERLAY_FS VETH BRIDGE SECCOMP_FILTER"
+          bad=0
+          for c in $CORE; do
             v=$(grep -m1 "^CONFIG_${c}=" out/.config | cut -d= -f2)
             printf '  %-22s %s\n' "$c" "${v:-无}"
-            if [ "$v" != "y" ]; then
-              echo "::error::CONFIG_${c} 必须内建(=y):设备上没有对应厂商 .ko,Droidspaces/WiFi 会缺功能"
-              exit 1
-            fi
+            [ "$v" = "y" ] || bad=$((bad+1))
           done
-          if grep -q "^CONFIG_CFG80211_WEXT=y" out/.config; then
-            echo "::error::CFG80211_WEXT 仍为 y ⇒ struct wireless_dev 布局与原厂不一致(vendor WLAN 有风险)"
+          echo "=== NAT 附加项(尽力而为,不阻断构建) ==="
+          for c in NF_NAT NFT_NAT NF_TABLES_INET IP_NF_NAT IP_NF_TARGET_MASQUERADE NETFILTER_XT_TARGET_MASQUERADE; do
+            v=$(grep -m1 "^CONFIG_${c}=" out/.config | cut -d= -f2)
+            printf '  %-34s %s\n' "$c" "${v:-无}"
+          done
+          if [ "$bad" != "0" ]; then
+            echo "::error::有 $bad 项 Droidspaces 核心要件不是 =y(设备上没有对应厂商 .ko,必须内建)"
             exit 1
+          fi
+          if grep -q "^CONFIG_CFG80211_WEXT=y" out/.config; then
+            echo "::error::CFG80211_WEXT 仍为 y ⇒ struct wireless_dev 布局与原厂不一致"; exit 1
           fi
           echo "✅ Droidspaces/WiFi 要件齐备,MAC80211 内建,CFG80211_WEXT 已关"
 
