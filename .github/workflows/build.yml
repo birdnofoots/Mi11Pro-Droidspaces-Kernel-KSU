@@ -679,6 +679,30 @@ jobs:
           echo "=== 复核 ==="
           grep -rn "EXPORT_TRACEPOINT_SYMBOL.*tracing_mark_write" --include=*.c --include=*.h . | grep -v "removed by CI" | head -5 || echo "  ✅ 已无有效导出语句"
 
+      # ── ★★★ 不把 techpack 显示驱动编进 vmlinux(与原厂一致) ──────────
+      #   实测证据(2026-10-03,两轮):
+      #     1.42s  msm_drm: exports duplicate symbol __tracepoint_tracing_mark_write (owned by kernel)
+      #     (修掉后)1.42s  msm_drm: exports duplicate symbol disp_log_printk (owned by kernel)
+      #     ⇒ vendor msm_drm.ko 反复被 complete_formation→verify_exported_symbols 拒装
+      #   来源:techpack/display/msm/Makefile:177  obj-$(CONFIG_DISPLAY_BUILD) += msm_drm.o
+      #     我们 Image 里 sde_crtc 100 处、sde_kms 72 处、dsi_display 36 处 ⇒ 整套显示驱动内建
+      #   原厂:readlink /sys/bus/platform/devices/ae00000.qcom,mdss_mdp/driver → msm_drm(模块),
+      #     且 vendor msm_drm.ko 自带 sde_*/dsi_*(实测其导入表里 0 项),只依赖内核 DRM 核心
+      #     (GKI_HIDDEN_DRM_CONFIGS=y 已提供)。
+      #   ⇒ 内核这份必须去掉:①否则符号撞名打地鼠;②两个驱动抢同一块显示硬件
+      #     (疑为 ~15s 硬卡死/看门狗复位的元凶)。
+      - name: ★ 不把 techpack 显示驱动编进内核(解 disp_log_printk 等撞名)
+        run: |
+          cd kernel
+          MF=techpack/display/msm/Makefile
+          test -f "$MF" || { echo "::error::找不到 $MF"; exit 1; }
+          echo "=== 改前 ==="
+          grep -nE "obj-.*msm_drm\.o" "$MF" || echo "  (没有 obj- 行引用 msm_drm.o)"
+          sed -i -E 's|^([[:space:]]*obj-[^[:space:]]*[[:space:]]*\+=[[:space:]]*msm_drm\.o.*)$|# disabled by CI (vendor msm_drm.ko owns the display): \1|' "$MF"
+          echo "=== 改后 ==="
+          grep -nE "msm_drm\.o|disabled by CI" "$MF" | head -5
+          grep -q "disabled by CI" "$MF" || { echo "::error::没能注释掉 msm_drm.o"; exit 1; }
+
       # ── KernelSU ──────────────────────────────────────────────
       - name: 集成 KernelSU
         if: matrix.ksu == '1'
@@ -911,12 +935,14 @@ jobs:
         run: |
           cd kernel
           ./scripts/config --file out/.config \
-            -d DYNAMIC_FTRACE -d DYNAMIC_FTRACE_WITH_REGS -d FTRACE_MCOUNT_RECORD
+            -d DYNAMIC_FTRACE -d DYNAMIC_FTRACE_WITH_REGS -d FTRACE_MCOUNT_RECORD \
+            -e DETECT_HUNG_TASK -d BOOTPARAM_HUNG_TASK_PANIC --set-val DEFAULT_HUNG_TASK_TIMEOUT 15
           make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} olddefconfig
           echo "=== struct module 布局相关开关 ==="
           for c in FUNCTION_TRACER DYNAMIC_FTRACE FTRACE_MCOUNT_RECORD FUNCTION_ERROR_INJECTION \
                    FTRACE TRACING EVENT_TRACING JUMP_LABEL BPF_EVENTS MODULE_UNLOAD CONSTRUCTORS \
-                   LIVEPATCH CFI_CLANG KALLSYMS SMP TRACEPOINTS TREE_SRCU SYSFS GENERIC_BUG; do
+                   LIVEPATCH CFI_CLANG KALLSYMS SMP TRACEPOINTS TREE_SRCU SYSFS GENERIC_BUG \
+                   DETECT_HUNG_TASK DEFAULT_HUNG_TASK_TIMEOUT; do
             printf '  %-30s %s\n' "$c" "$(grep -m1 "^CONFIG_${c}=" out/.config || grep -m1 "^# CONFIG_${c} is not set" out/.config || echo '(不在本树)')"
           done
           if grep -q "^CONFIG_FTRACE_MCOUNT_RECORD=y" out/.config; then
@@ -948,17 +974,28 @@ jobs:
             exit 1
           fi
 
-      # ── 断言:tracing_mark_write 不能再由内核导出 ──────────────
-      - name: ★ 断言 tracing_mark_write 已不由内核导出
+      # ── 断言:显示驱动与 tracing_mark_write 都不能再来自内核 ──────
+      - name: ★ 断言 内核里已无 techpack 显示驱动
         run: |
           cd kernel
-          test -f out/Module.symvers || { echo "::error::没有 out/Module.symvers"; exit 1; }
-          if grep -qP "\t__tracepoint_tracing_mark_write\t" out/Module.symvers; then
-            echo "::error::内核仍导出 __tracepoint_tracing_mark_write ⇒ vendor msm_drm.ko 会被 verify_exported_symbols 拒绝"
-            grep -P "\t__tracepoint_tracing_mark_write\t" out/Module.symvers
-            exit 1
-          fi
-          echo "✅ __tracepoint_tracing_mark_write 已不由内核导出(vendor msm_drm.ko 可以加载)"
+          IMG=out/arch/arm64/boot/Image
+          test -f "$IMG" || { echo "::error::没有 Image"; exit 1; }
+          for s in disp_log_printk sde_crtc dsi_display; do
+            n=$(strings "$IMG" | grep -c "$s" || true)
+            printf '  %-18s %s 处\n' "$s" "$n"
+            if [ "$n" != "0" ]; then
+              echo "::error::Image 里仍有 techpack 显示驱动痕迹($s)"
+              strings "$IMG" | grep -m3 "$s"
+              exit 1
+            fi
+          done
+          for s in disp_log_printk __tracepoint_tracing_mark_write; do
+            if grep -qP "\t$s\t" out/Module.symvers; then
+              echo "::error::内核仍导出 $s ⇒ vendor msm_drm.ko 会被拒装"
+              exit 1
+            fi
+          done
+          echo "✅ 内核已无 techpack 显示驱动,也不再导出冲突符号(vendor msm_drm.ko 可加载)"
 
       # ── 校验 ──────────────────────────────────────────────────
       - name: 校验产物
