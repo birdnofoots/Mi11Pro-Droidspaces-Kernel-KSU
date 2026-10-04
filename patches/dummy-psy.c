@@ -57,31 +57,24 @@ static struct delayed_work dummy_work;
 static struct regulator *touch_vreg;
 static bool touch_force_load_done;
 
-/* 强制装载触屏链:用 call_usermodehelper+insmod 直载。
- * 为什么不用 request_module:内核 usermode helper 去 /lib/modules/ 找,ENOENT
- *   (实测 p1i11: request_module(hwid) ret=-2)。模块实际在 /vendor/lib/modules/。
- * 为什么不用 vendor_modprobe:它走 modprobe 依赖链,hwid.ko 失败(内建占名/符号撞名)
- *   ⇒ fts_touch_spi_k2 永远不被装载(实测 p1i10/p1i11)。
- * insmod 只解析内核导出表,不看 modules.dep —— 内建已提供 get_hw_x / xiaomi_touch_x 符号。 */
-static int dummy_run(const char *cmd)
-{
-	char *argv[] = { "/vendor/bin/sh", "-c", (char *)cmd, NULL };
-	static char *envp[] = { "HOME=/", "PATH=/vendor/bin:/system/bin:/sbin", NULL };
-	int ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
-	pr_info("dummy-psy: run [%s] ret=%d\n", cmd, ret);
-	return ret;
-}
-
 static void touch_force_load(void)
 {
+	static char *envp[] = { "HOME=/", "PATH=/system/bin:/vendor/bin:/sbin", NULL };
+	char *a1[] = { "/system/bin/insmod", "/vendor/lib/modules/hwid.ko", NULL };
+	char *a2[] = { "/system/bin/insmod", "/vendor/lib/modules/xiaomi_touch.ko", NULL };
+	char *a3[] = { "/system/bin/insmod", "/vendor/lib/modules/fts_touch_spi_k2.ko", NULL };
+	int ret;
 	if (touch_force_load_done)
 		return;
 	touch_force_load_done = true;
-	/* 顺序:先 xiaomi_touch/hwid(可能因占名失败,可接受),最后 fts(符号从内建取) */
-	dummy_run("insmod /vendor/lib/modules/hwid.ko");
-	dummy_run("insmod /vendor/lib/modules/xiaomi_touch.ko");
-	dummy_run("insmod /vendor/lib/modules/fts_touch_spi_k2.ko");
-	dummy_run("ls -l /sys/module/fts_touch_spi_k2 /sys/module/hwid /sys/module/xiaomi_touch 2>&1 | head -20");
+	/* 内建已导出 get_hw_x / xiaomi_touch_x 符号;insmod 只查内核导出表,不走 modules.dep。
+	 * 用 /system/bin/insmod(toybox) 直调,不经 sh —— p1i12 实测 sh -c 退出 255。 */
+	ret = call_usermodehelper(a1[0], a1, envp, UMH_WAIT_PROC);
+	pr_info("dummy-psy: insmod hwid ret=%d\n", ret);
+	ret = call_usermodehelper(a2[0], a2, envp, UMH_WAIT_PROC);
+	pr_info("dummy-psy: insmod xiaomi_touch ret=%d\n", ret);
+	ret = call_usermodehelper(a3[0], a3, envp, UMH_WAIT_PROC);
+	pr_info("dummy-psy: insmod fts_touch ret=%d\n", ret);
 }
 
 static void dummy_register_all(void)
