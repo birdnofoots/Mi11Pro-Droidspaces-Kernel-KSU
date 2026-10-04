@@ -65,6 +65,13 @@ inject = """
 			return -EPERM;
 		}
 		pr_info("mars-allow: %s\\n", __mn);
+		/* ★ 2026-10-05: 跳过 vermagic 比对。
+		   实锤(p1i9 36MB 早期 logdump):
+		     hwid: version magic '5.4.233-gbb70cde46897 ...' should be '5.4.233-qgki-gbb70cde46897 ...'
+		   原厂 .ko 的 vermagic 不统一(有的带 -qgki 有的不带),
+		   同一字面比对永远拦死一批。MODVERSIONS 已关,符号 CRC 不查;
+		   这里放行即返回,把 vermagic/retpoline 等剩余检查一并跳过。 */
+		return 0;
 	}
 """
 s = s[:m2.end()] + inject + s[m2.end():]
