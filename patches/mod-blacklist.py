@@ -13,8 +13,10 @@ if "mars-module-blacklist" in s:
 helper = """
 /* mars-module-blacklist */
 static const char * const mars_mod_allow[] = {
-\t"msm_drm",
-\tNULL
+	"msm_drm", "hwid", "xiaomi_touch", "fts_touch_spi_k2",
+	"cyttsp5", "cyttsp5_loader", "cyttsp5_device_access", "cyttsp5_i2c",
+	"mi_thermal_interface",
+	NULL
 };
 static bool mars_module_blocked(const char *name)
 {
