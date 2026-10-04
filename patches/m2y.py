@@ -35,6 +35,13 @@ KEEP = (
     #   内建驱动在 userspace 起来前 probe ⇒ 永远等不到 firmware helper ⇒ 整机卡死。
     #   保持 =m,让 probe 推迟到模块加载(此时 /vendor/firmware 已可读)。
     'CONFIG_TOUCHSCREEN_ST_FTS',
+    # ★ 2026-10-04 p1i7 失败根因: XIAOMI_TOUCHFEATURE 被翻成 =y 后:
+    #   1) 内建 xiaomi_touch 占名 ⇒ 原厂 xiaomi_touch.ko 装不上;
+    #   2) 其 10 个接口符号又被 NAMES 去导出 ⇒ 内建也不给符号;
+    #   3) fts_touch_spi_k2 depends=xiaomi_touch ⇒ modprobe 依赖解析失败,fts 永不装载。
+    #   实锤: p1i7 logdump 里 xiaomi_touch_dev_ioctl 在跑(内建框架),但 0 条 fts/hwid。
+    #   保持 =m,让原厂 xiaomi_touch.ko 装载并导出 fts 需要的全部符号。
+    'CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE',
 )
 
 # ★ 2026-10-02 新增开关:M2Y_NOFLIP=1 ⇒ 【不把 =m 翻成 =y】,只做 DISABLE。
