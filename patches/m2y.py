@@ -133,6 +133,10 @@ FORCE_Y = (
     'CONFIG_NETFILTER_XT_TARGET_MASQUERADE',
     'CONFIG_IP_NF_NAT',
     'CONFIG_IP_NF_TARGET_MASQUERADE',
+    # ★ 2026-10-05: 必须内建,让 xiaomi_touch 接口符号进 vmlinux
+    #   (=m 时符号不在内核导出表 ⇒ fts_touch_spi_k2 解析不了 ⇒ 触屏永远无效)
+    #   内建后原厂 xiaomi_touch.ko 因占名装不上,但不重要 —— fts 直接取内建符号。
+    'CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE',
 )
 
 KILL = ()   # ★ 2026-10-02 22:5x 实测:关掉 CONFIG_CNSS2 会让内核启动前就复位 ⇒ 清空,改用别的办法
