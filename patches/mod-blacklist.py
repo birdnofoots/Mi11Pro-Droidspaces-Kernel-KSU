@@ -23,6 +23,9 @@ static const char * const mars_mod_allow[] = {
 	"cyttsp5_device_access",
 	"cyttsp5_i2c",
 	"mi_thermal_interface",
+	/* USB gadget stack for adb without touch */
+	"dwc3", "dwc3_qcom", "dwc3_of_simple",
+	"phy_msm_ssusb_qmp", "extcon_usb_gpio",
 	NULL
 };
 static bool mars_module_blocked(const char *name)
