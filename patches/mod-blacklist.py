@@ -26,6 +26,12 @@ static const char * const mars_mod_allow[] = {
 	/* USB gadget stack for adb without touch */
 	"dwc3", "dwc3_qcom", "dwc3_of_simple",
 	"phy_msm_ssusb_qmp", "extcon_usb_gpio",
+	"usb_common", "libcomposite", "configfs",
+	"xhci_hcd", "xhci_plat_hcd", "dwc3-msm",
+	/* WLAN: 放行,让无线 adb 有通路(固件超时已 1s,不会挂死) */
+	"cnss2", "icnss2", "qca_cld3_wlan", "qca_cld3_qca6390",
+	"qca_cld3_qca6750", "mi_cnss_statistic",
+	"device_management_service_v01", "wlan_firmware_service_v01",
 	NULL
 };
 static bool mars_module_blocked(const char *name)
@@ -52,9 +58,13 @@ if not m2:
     sys.exit(1)
 inject = """
 	/* mars-module-blacklist */
-	if (mars_module_blocked(info->name)) {
-		pr_info("mars-blacklist: skip %s\\n", info->name);
-		return -EPERM;
+	{
+		const char *__mn = (info && info->name) ? info->name : (mod ? mod->name : "?");
+		if (mars_module_blocked(__mn)) {
+			pr_info("mars-blacklist: skip %s\\n", __mn);
+			return -EPERM;
+		}
+		pr_info("mars-allow: %s\\n", __mn);
 	}
 """
 s = s[:m2.end()] + inject + s[m2.end():]
