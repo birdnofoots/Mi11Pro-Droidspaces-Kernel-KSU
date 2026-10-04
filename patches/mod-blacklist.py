@@ -13,18 +13,22 @@ if "mars-module-blacklist" in s:
 helper = """
 /* mars-module-blacklist */
 static const char * const mars_mod_allow[] = {
-	"msm_drm", "hwid", "xiaomi_touch", "fts_touch_spi_k2",
-	"cyttsp5", "cyttsp5_loader", "cyttsp5_device_access", "cyttsp5_i2c",
-	"mi_thermal_interface",
+	/* only block WLAN for now; everything else loads */
+	NULL
+};
+static const char * const mars_mod_block[] = {
+	"qca_cld3_wlan", "qca_cld3_qca6390", "qca_cld3_qca6750",
+	"cnss2", "icnss2", "mi_cnss_statistic", "wlan_firmware_service_v01",
+	"cnss_utils", "cnss_nl", "cnss_prealloc",
 	NULL
 };
 static bool mars_module_blocked(const char *name)
 {
-\tint i;
-\tif (!name || !name[0]) return false;
-\tfor (i = 0; mars_mod_allow[i]; i++)
-\t\tif (!strcmp(name, mars_mod_allow[i])) return false;
-\treturn true;
+	int i;
+	if (!name || !name[0]) return false;
+	for (i = 0; mars_mod_block[i]; i++)
+		if (!strcmp(name, mars_mod_block[i])) return true;
+	return false;
 }
 """
 m = re.search(r"\nstatic int check_modinfo\(", s)
