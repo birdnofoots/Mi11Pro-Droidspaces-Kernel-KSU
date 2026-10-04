@@ -62,7 +62,7 @@ static bool touch_force_load_done;
  *   (实测 p1i11: request_module(hwid) ret=-2)。模块实际在 /vendor/lib/modules/。
  * 为什么不用 vendor_modprobe:它走 modprobe 依赖链,hwid.ko 失败(内建占名/符号撞名)
  *   ⇒ fts_touch_spi_k2 永远不被装载(实测 p1i10/p1i11)。
- * insmod 只解析内核导出表,不看 modules.dep —— 内建已提供 get_hw_*/xiaomi_touch_* 符号。 */
+ * insmod 只解析内核导出表,不看 modules.dep —— 内建已提供 get_hw_x / xiaomi_touch_x 符号。 */
 static int dummy_run(const char *cmd)
 {
 	char *argv[] = { "/vendor/bin/sh", "-c", (char *)cmd, NULL };
