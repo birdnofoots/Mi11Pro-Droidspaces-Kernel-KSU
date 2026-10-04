@@ -7,6 +7,7 @@
 #include <linux/jiffies.h>
 #include <linux/regulator/consumer.h>
 #include <linux/of.h>
+#include <linux/kmod.h>
 
 static int dummy_get_property(struct power_supply *psy,
 			      enum power_supply_property psp,
@@ -54,6 +55,25 @@ static struct platform_device *dummy_pdev;
 static struct power_supply *usb_psy, *batt_psy;
 static struct delayed_work dummy_work;
 static struct regulator *touch_vreg;
+static bool touch_force_load_done;
+
+/* 强制装载触屏链并打日志 —— modprobe 对内建模块会静默跳过,这里显式 request_module */
+static void touch_force_load(void)
+{
+	static const char * const names[] = {
+		"hwid", "xiaomi_touch", "fts_touch_spi_k2",
+		"cyttsp5", "cyttsp5_loader", "cyttsp5_device_access", "cyttsp5_i2c",
+		NULL
+	};
+	int i, ret;
+	if (touch_force_load_done)
+		return;
+	touch_force_load_done = true;
+	for (i = 0; names[i]; i++) {
+		ret = request_module(names[i]);
+		pr_info("dummy-psy: request_module(%s) ret=%d\n", names[i], ret);
+	}
+}
 
 static void dummy_register_all(void)
 {
@@ -83,6 +103,7 @@ static void dummy_work_fn(struct work_struct *work)
 			pr_info("dummy-psy: touch_vreg enable ret=%d\n", ret);
 		}
 	}
+	touch_force_load();
 	schedule_delayed_work(&dummy_work, msecs_to_jiffies(3000));
 }
 
