@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-"""kernel/module.c 模块黑名单（只拦 WLAN，其余全部放行）。
-
-sde59 实锤：WLAN 链 (qca_cld3_*/cnss2/icnss2) 的 probe 会挂住 vendor_modprobe 的 exec。
-其余模块（USB/触屏/电池/平台）必须放行 —— 拦了会导致 USB gadget -19 / 无触屏。
+"""kernel/module.c 模块白名单 —— 与 MIUI 基线 (boot-p1-allowlist.img) 相同集合。
+唯一增量：get_hw_* 保持导出（不再去导出），供 fts_touch 取符号。
 """
 import os, re, sys
 
@@ -15,10 +13,16 @@ if "mars-module-blacklist" in s:
 
 helper = r'''
 /* mars-module-blacklist */
-static const char * const mars_mod_block[] = {
-	"qca_cld3_wlan", "qca_cld3_qca6390", "qca_cld3_qca6750",
-	"cnss2", "icnss2", "mi_cnss_statistic", "wlan_firmware_service_v01",
-	"cnss_utils", "cnss_nl", "cnss_prealloc",
+static const char * const mars_mod_allow[] = {
+	"msm_drm",
+	"hwid",
+	"xiaomi_touch",
+	"fts_touch_spi_k2",
+	"cyttsp5",
+	"cyttsp5_loader",
+	"cyttsp5_device_access",
+	"cyttsp5_i2c",
+	"mi_thermal_interface",
 	NULL
 };
 static bool mars_module_blocked(const char *name)
@@ -26,10 +30,10 @@ static bool mars_module_blocked(const char *name)
 	int i;
 	if (!name || !name[0])
 		return false;
-	for (i = 0; mars_mod_block[i]; i++)
-		if (!strcmp(name, mars_mod_block[i]))
-			return true;
-	return false;
+	for (i = 0; mars_mod_allow[i]; i++)
+		if (!strcmp(name, mars_mod_allow[i]))
+			return false;
+	return true;
 }
 '''
 
@@ -39,7 +43,6 @@ if not m:
     sys.exit(1)
 s = s[:m.start()] + "\n" + helper + s[m.start():]
 
-# inject at start of check_modinfo body
 m2 = re.search(r"check_modinfo\s*\([^;{]*\)\s*\{", s, re.S)
 if not m2:
     print("mod-blacklist: check_modinfo body not found")
@@ -53,8 +56,6 @@ inject = """
 """
 s = s[:m2.end()] + inject + s[m2.end():]
 open(path, "w").write(s)
-print("mod-blacklist: injected (block-only-WLAN)")
-# sanity: must contain block list and NOT allowlist-return-true
-assert "mars_mod_block[i]" in s
-assert "return true;\n}" in s.replace("return true;\r\n}", "return true;\n}")
-print("ok")
+assert "mars_mod_allow[i]" in s
+assert "return true;" in s
+print("mod-blacklist: allowlist applied (msm_drm+touch chain, same as MIUI baseline)")
