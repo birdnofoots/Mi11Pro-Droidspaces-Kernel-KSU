@@ -100,10 +100,8 @@ static int __init dummy_psy_init(void)
 	np = of_find_node_by_name(NULL, "touch_avddsource_vreg");
 	if (np) {
 		touch_vreg = regulator_get(&dummy_pdev->dev, "touch_avddsource_vreg");
-		if (IS_ERR(touch_vreg)) {
-			/* try by phandle */
-			touch_vreg = regulator_get(np, NULL);
-		}
+		if (IS_ERR(touch_vreg))
+			touch_vreg = regulator_get(&dummy_pdev->dev, NULL);
 		if (IS_ERR(touch_vreg)) {
 			pr_warn("dummy-psy: touch_vreg get failed %ld\n", PTR_ERR(touch_vreg));
 			touch_vreg = NULL;
