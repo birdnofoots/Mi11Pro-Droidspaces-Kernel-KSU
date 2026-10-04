@@ -114,7 +114,8 @@
  *   (原厂 logdump 只写开头,刷回原厂后这份快照仍在,可 dd 读回)。
  */
 #define LOGDUMP_EARLY_MS	6000
-#define LOGDUMP_EARLY_OFFSET	(32ULL * 1024 * 1024)
+/* ★ 2026-10-05:早期快照改 36MB,避免被 55s SNAP2(32MB)覆盖 —— 否则永远读不到模块装载行 */
+#define LOGDUMP_EARLY_OFFSET	(36ULL * 1024 * 1024)
 /*
  * ★ 2026-10-03 诊断用:开箱现场快照 + 自动回 fastboot。
  *   现象:内核能启动但卡在 ~50s(module_mutex 被某个 vendor 模块 init 永久占住,
@@ -594,7 +595,7 @@ static int logdump_write_log(char *buf, size_t text_off, size_t len, u32 seq,
 		/* v4.10:写成功才置位;失败下一轮重试(否则 6s 现场永远丢) */
 		if (!logdump_write(LOGDUMP_EARLY_OFFSET, h, total)) {
 			logdump_early_done = true;
-			pr_emerg("logdump: 已写入开机早期快照(%llums, 32MB 偏移)\n",
+			pr_emerg("logdump: 已写入开机早期快照(%llums, 36MB 偏移)\n",
 				 (unsigned long long)logdump_uptime_ms());
 		}
 	}
