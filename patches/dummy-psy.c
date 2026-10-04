@@ -57,22 +57,31 @@ static struct delayed_work dummy_work;
 static struct regulator *touch_vreg;
 static bool touch_force_load_done;
 
-/* 强制装载触屏链并打日志 —— modprobe 对内建模块会静默跳过,这里显式 request_module */
+/* 强制装载触屏链:用 call_usermodehelper+insmod 直载。
+ * 为什么不用 request_module:内核 usermode helper 去 /lib/modules/ 找,ENOENT
+ *   (实测 p1i11: request_module(hwid) ret=-2)。模块实际在 /vendor/lib/modules/。
+ * 为什么不用 vendor_modprobe:它走 modprobe 依赖链,hwid.ko 失败(内建占名/符号撞名)
+ *   ⇒ fts_touch_spi_k2 永远不被装载(实测 p1i10/p1i11)。
+ * insmod 只解析内核导出表,不看 modules.dep —— 内建已提供 get_hw_*/xiaomi_touch_* 符号。 */
+static int dummy_run(const char *cmd)
+{
+	char *argv[] = { "/vendor/bin/sh", "-c", (char *)cmd, NULL };
+	static char *envp[] = { "HOME=/", "PATH=/vendor/bin:/system/bin:/sbin", NULL };
+	int ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
+	pr_info("dummy-psy: run [%s] ret=%d\n", cmd, ret);
+	return ret;
+}
+
 static void touch_force_load(void)
 {
-	static const char * const names[] = {
-		"hwid", "xiaomi_touch", "fts_touch_spi_k2",
-		"cyttsp5", "cyttsp5_loader", "cyttsp5_device_access", "cyttsp5_i2c",
-		NULL
-	};
-	int i, ret;
 	if (touch_force_load_done)
 		return;
 	touch_force_load_done = true;
-	for (i = 0; names[i]; i++) {
-		ret = request_module(names[i]);
-		pr_info("dummy-psy: request_module(%s) ret=%d\n", names[i], ret);
-	}
+	/* 顺序:先 xiaomi_touch/hwid(可能因占名失败,可接受),最后 fts(符号从内建取) */
+	dummy_run("insmod /vendor/lib/modules/hwid.ko");
+	dummy_run("insmod /vendor/lib/modules/xiaomi_touch.ko");
+	dummy_run("insmod /vendor/lib/modules/fts_touch_spi_k2.ko");
+	dummy_run("ls -l /sys/module/fts_touch_spi_k2 /sys/module/hwid /sys/module/xiaomi_touch 2>&1 | head -20");
 }
 
 static void dummy_register_all(void)
