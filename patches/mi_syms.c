@@ -145,3 +145,19 @@ int mi_disp_unregister_client(void *client)
 	return 0;
 }
 
+/* ── ★ 2026-10-05: fts_touch_spi_k2.ko 需要但内核未导出的 2 个 xiaomi_touch 符号 ──
+ *   静态矩阵实锤: fts 仅缺 4 符号, 其中 2 个(mi_disp_register/unregister_client)可从
+ *   已装载的 msm_drm.ko 取得; 剩下这 2 个只能由 xiaomi_touch 提供。
+ *   xiaomi_touch 已 FORCE_Y 内建但源码可能无 EXPORT_SYMBOL ⇒ 这里补桩导出。
+ *   若编译报重复定义, 说明真实现在 vmlinux 中 ⇒ 改为在源码加 EXPORT_SYMBOL。
+ */
+void last_touch_events_collect(void *data, int len)
+{
+}
+EXPORT_SYMBOL(last_touch_events_collect);
+
+void update_fod_press_status(int value)
+{
+}
+EXPORT_SYMBOL(update_fod_press_status);
+
