@@ -56,6 +56,7 @@ static struct power_supply *usb_psy, *batt_psy;
 static struct delayed_work dummy_work;
 static struct regulator *touch_vreg;
 static bool touch_force_load_done;
+static int dummy_work_count;
 
 static void touch_force_load(void)
 {
@@ -66,8 +67,9 @@ static void touch_force_load(void)
 		"echo \"fts-insmod: done $(cat /sys/module/fts_touch_spi_k2/initstate 2>/dev/null)\" >/dev/kmsg",
 		NULL };
 	int ret;
-	/* 只在 12s 后执行一次(linker64 就绪) */
-	if (touch_force_load_done || jiffies < msecs_to_jiffies(12000))
+	/* 每 3s 一次 work,第 5 次 ≈ 12s 后再执行(linker64 就绪)。
+	 * 不能用 jiffies 比较 —— INITIAL_JIFFIES 回绕导致判断永远为假。 */
+	if (touch_force_load_done || dummy_work_count < 5)
 		return;
 	touch_force_load_done = true;
 	ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
@@ -103,6 +105,7 @@ static void dummy_work_fn(struct work_struct *work)
 		}
 	}
 	/* 12s 后再 insmod:3s 时 /system/bin/linker64 尚不可用,call_usermodehelper 全部 exit 255 */
+	dummy_work_count++;
 	touch_force_load();
 	schedule_delayed_work(&dummy_work, msecs_to_jiffies(3000));
 }
