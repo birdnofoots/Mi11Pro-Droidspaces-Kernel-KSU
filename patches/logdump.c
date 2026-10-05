@@ -113,7 +113,7 @@
  *   做法:在 uptime 到 LOGDUMP_EARLY_MS 时,把当前正文另存一份到 32MB 偏移
  *   (原厂 logdump 只写开头,刷回原厂后这份快照仍在,可 dd 读回)。
  */
-#define LOGDUMP_EARLY_MS	6000
+#define LOGDUMP_EARLY_MS	20000
 /* ★ 2026-10-05:早期快照改 36MB,避免被 55s SNAP2(32MB)覆盖 —— 否则永远读不到模块装载行 */
 #define LOGDUMP_EARLY_OFFSET	(36ULL * 1024 * 1024)
 /*
