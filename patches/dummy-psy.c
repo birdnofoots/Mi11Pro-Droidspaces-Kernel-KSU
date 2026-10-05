@@ -60,21 +60,18 @@ static bool touch_force_load_done;
 static void touch_force_load(void)
 {
 	static char *envp[] = { "HOME=/", "PATH=/system/bin:/vendor/bin:/sbin", NULL };
-	char *a1[] = { "/system/bin/insmod", "/vendor/lib/modules/hwid.ko", NULL };
-	char *a2[] = { "/system/bin/insmod", "/vendor/lib/modules/xiaomi_touch.ko", NULL };
-	char *a3[] = { "/system/bin/insmod", "/vendor/lib/modules/fts_touch_spi_k2.ko", NULL };
+	/* 用 toybox sh 把 stderr 写进 dmesg,方便 logdump 抓原因 */
+	char *argv[] = { "/system/bin/sh", "-c",
+		"/system/bin/insmod /vendor/lib/modules/fts_touch_spi_k2.ko 2>&1 | while read l; do echo \"fts-insmod: $l\" >/dev/kmsg; done; "
+		"echo \"fts-insmod: done $(cat /sys/module/fts_touch_spi_k2/initstate 2>/dev/null)\" >/dev/kmsg",
+		NULL };
 	int ret;
-	if (touch_force_load_done)
+	/* 只在 12s 后执行一次(linker64 就绪) */
+	if (touch_force_load_done || jiffies < msecs_to_jiffies(12000))
 		return;
 	touch_force_load_done = true;
-	/* 内建已导出 get_hw_x / xiaomi_touch_x 符号;insmod 只查内核导出表,不走 modules.dep。
-	 * 用 /system/bin/insmod(toybox) 直调,不经 sh —— p1i12 实测 sh -c 退出 255。 */
-	ret = call_usermodehelper(a1[0], a1, envp, UMH_WAIT_PROC);
-	pr_info("dummy-psy: insmod hwid ret=%d\n", ret);
-	ret = call_usermodehelper(a2[0], a2, envp, UMH_WAIT_PROC);
-	pr_info("dummy-psy: insmod xiaomi_touch ret=%d\n", ret);
-	ret = call_usermodehelper(a3[0], a3, envp, UMH_WAIT_PROC);
-	pr_info("dummy-psy: insmod fts_touch ret=%d\n", ret);
+	ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
+	pr_info("dummy-psy: fts-insmod helper ret=%d\n", ret);
 }
 
 static void dummy_register_all(void)
@@ -105,6 +102,7 @@ static void dummy_work_fn(struct work_struct *work)
 			pr_info("dummy-psy: touch_vreg enable ret=%d\n", ret);
 		}
 	}
+	/* 12s 后再 insmod:3s 时 /system/bin/linker64 尚不可用,call_usermodehelper 全部 exit 255 */
 	touch_force_load();
 	schedule_delayed_work(&dummy_work, msecs_to_jiffies(3000));
 }
