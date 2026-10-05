@@ -75,25 +75,25 @@ EXPORT_SYMBOL(mi_display_pm_suspend_callback_set);
  *     msm_pcie_dsp_link_control()    : DSP(音频)侧链路控制 ⇒ 返回 0 不干预
  *     mhi_force_reset()              : 只在 WLAN SSR(异常恢复)时调用 ⇒ 只影响"出错后自愈"
  */
-int msm_pcie_reg_dump(void)
+int __weak msm_pcie_reg_dump(void)
 {
 	return 0;
 }
 EXPORT_SYMBOL(msm_pcie_reg_dump);
 
-int msm_pcie_set_target_link_speed(void)
+int __weak msm_pcie_set_target_link_speed(void)
 {
 	return 0;
 }
 EXPORT_SYMBOL(msm_pcie_set_target_link_speed);
 
-int msm_pcie_dsp_link_control(void)
+int __weak msm_pcie_dsp_link_control(void)
 {
 	return 0;
 }
 EXPORT_SYMBOL(msm_pcie_dsp_link_control);
 
-int mhi_force_reset(void)
+int __weak mhi_force_reset(void)
 {
 	return 0;
 }
@@ -160,4 +160,5 @@ void update_fod_press_status(int value)
 {
 }
 EXPORT_SYMBOL(update_fod_press_status);
+
 
