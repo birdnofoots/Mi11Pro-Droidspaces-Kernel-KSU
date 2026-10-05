@@ -69,7 +69,7 @@ static void touch_force_load(void)
 	int ret;
 	/* 每 3s 一次 work,第 5 次 ≈ 12s 后再执行(linker64 就绪)。
 	 * 不能用 jiffies 比较 —— INITIAL_JIFFIES 回绕导致判断永远为假。 */
-	if (touch_force_load_done || dummy_work_count < 5)
+	if (touch_force_load_done || dummy_work_count < 2)
 		return;
 	touch_force_load_done = true;
 	ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
