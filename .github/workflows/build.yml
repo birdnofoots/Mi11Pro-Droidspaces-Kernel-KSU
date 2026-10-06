@@ -571,6 +571,14 @@ jobs:
           echo "--- 自证:结构体第一字段 ---"
           sed -n '/struct msm_pcie_register_event {/,/};/p' include/linux/msm_pcie.h | head -4
 
+      - name: ★★ 放大 printk 环缓冲下限到 4MB（解启动 4~12s 的日志盲区）
+        continue-on-error: true
+        run: |
+          cd kernel
+          python3 ../patches/log-buf-min.py . || echo "::warning::log-buf-min 未生效"
+          echo "--- 自证:环缓冲钳制 ---"
+          grep -n -A3 "mars-logbuf-clamp" kernel/printk/printk.c | head -6
+
       - name: ★ 注入 mod-blacklist（拒绝挂死的 vendor 模块）
         run: |
           cd kernel
