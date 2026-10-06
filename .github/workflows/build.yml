@@ -114,6 +114,17 @@ jobs:
               #    ⇒ bootloader 判启动失败 ⇒ fastboot/回退原厂。
               #    ⇒ 正解:保持 =m,让 /vendor 的原厂 .ko 自己装(vermagic 已对齐)。
               "star-stock-raw":   {"defconfig": "vendor/mars_qgki_ds_defconfig",    "directcfg": "1", "noflip": "1", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "★★ 原厂 config + 不翻内建(保持 =m)+ 全部补丁"},
+              # ★★★ 2026-10-06 F24:【回到唯一有硬成功证据的线】。
+              #   证据(§70,2026-10-02):star-stock(62 项 =m→=y 内建)能进 MIUI,
+              #   35.5s boot_complete,**触摸/显示可用**,只差 Wi-Fi。
+              #   它当年的死因有 logdump 出处(m2y.py KEEP 注释):
+              #     /vendor 同名 .ko 仍被 modprobe ⇒ "already registered" ×N
+              #     ⇒ WLAN 栈卡死(uptime 129.3s,init SIGKILL 'exec 24 modprobe … qca_cld3_wlan')
+              #     ⇒ 系统停住 ⇒ bootloader 判失败。
+              #   ⇒ 本轮的【唯一改动】= 用内核内黑名单(按 mod->name)拒绝 WLAN/CNSS 栈,
+              #     让那次 modprobe 立刻失败而不是卡死。
+              "star-stock":       {"defconfig": "vendor/mars_qgki_ds_defconfig",    "directcfg": "1", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "★ F24 L1 内建线 + WLAN/CNSS 黑名单 + 全部补丁(回到 §70 的成功架构)"},
+              "star-stock-ksu":   {"defconfig": "vendor/mars_qgki_ds_defconfig",    "directcfg": "1", "lto": "keep", "ksu": "1", "kabi": "0", "desc": "★ F24 同上 + 内建 KernelSU(刷完即 root,便于自诊断/Droidspaces)"},
               # ★★★ 2026-10-06 F21/run168【决定性对照实验】:纯原厂配置、零 Droidspaces 开关、
               #   连 kABI 补丁都不打(kabi=0)、MODVERSIONS 保持原厂 =y。
               #   目的:把「我们内核与原厂 ABI 的 33.77% 匹配率」这个数字归因 ——
