@@ -152,7 +152,17 @@ CONFIG_CGROUP_SCHED=y
 # CONFIG_FAIR_GROUP_SCHED is not set
 # CONFIG_RT_GROUP_SCHED is not set
 CONFIG_UCLAMP_TASK_GROUP=y
-CONFIG_CGROUP_PIDS=y
+# ★ 2026-10-06 F20/run166:回滚 CGROUP_PIDS(原厂运行时同样是"未设")。
+#   权威依据:Droidspaces 官方内核配置指南(GKI 章节)——
+#     "CONFIG_CFS_BANDWIDTH (for --cpus) and CONFIG_CGROUP_PIDS (for --pids-limit)
+#      ... Both change the size of scheduler and cgroup structures that almost every
+#      exported kernel function refers to. Measured on a 5.15 GKI tree, enabling the
+#      two changed the CRC of 4101 exported symbols. Stock vendor modules were built
+#      against the old CRCs, so they refuse to load ... Unlike CONFIG_SYSVIPC, the new
+#      fields do not fit in the reserved kABI padding, so there is no patch for this."
+#   ⇒ 我们既无法重编全部原厂模块(无源码),就必须让它保持原厂值。
+#   代价:--pids-limit 被跳过并给警告(app 里置灰);--cpus 不受影响(CFS_BANDWIDTH 本就没开)。
+# CONFIG_CGROUP_PIDS=y
 # CONFIG_CGROUP_RDMA is not set
 CONFIG_CGROUP_FREEZER=y
 CONFIG_CPUSETS=y
