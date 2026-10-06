@@ -771,272 +771,72 @@ static void logdump_check_stuck(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
- * ★★ 2026-10-06:自编内核自救 —— 「没有通道就自己切回另一个槽」
+ * ★★ 2026-10-06:自编内核自救 —— 「把好镜像刷回当前槽再重启」
  * ══════════════════════════════════════════════════════════════════════════
- * 现场(run157 真机):自编内核能启动进 MIUI,但
- *   · 没有 USB —— 内核日志 `USB cable not connected` + `gcc_usb30_prim_gdsc: disabling`,
- *     gadget 永不启动(wait:根因在 VBUS/充电链,不是 dwc3 本身)
- *   · 没有 WiFi —— 配方故意拦掉 WLAN 模块(mod-blacklist 只拦 qca_cld3_* 、cnss2、icnss2)
- *   · 没有触屏 —— 见 §18
- *   ⇒ 主机【完全没有通道】,只能等人工"音量下+电源进 fastboot + 插拔 USB"。
+ * 现场(run157 真机):自编内核能启动进 MIUI,但没有 USB(内核日志
+ *   `USB cable not connected` + `gcc_usb30_prim_gdsc: disabling`)、没有 WiFi
+ *   (配方故意拦 WLAN 模块)、没有触屏 ⇒ 主机完全没有通道,只能等人工插拔。
  *
- * 为什么不能靠别人:
- *   · 用户态看门狗(/data/adb/post-fs-data.d)由 APatch 执行;自编内核不带 APatch
- *     ⇒ 钩子根本不跑。
- *   · ABL 自带的重试回退不认这种失败:Android 能起来 ⇒ 该槽被标 successful ⇒
- *     slot-retry-count 永不扣 ⇒ 永远不回退。
- *   ⇒ 只能由内核自己动手。
+ * ★ 为什么【不】切到另一个槽(2026-10-06 架构级实测结论):
+ *   这台机器是 **virtual A/B**(`lpdump` 的 Header flags: virtual_ab_device)。
+ *   `super` 只有 8.5 GiB,而 A 侧逻辑分区已占 ~6.4 GB ⇒ **放不下另一份**,
+ *   所以 `system_b`/`vendor_b`/`product_b`/`system_ext_b`/`odm_b`/`mi_ext_b`
+ *   的 Extents **全是空的**(出厂如此,只有 OTA 时才临时填充)。
+ *   ⇒ B 槽的引导链虽然完好(A/B 物理分区逐字节相同,已用 24 对 md5 证实),
+ *     但它**没有系统** ⇒ 永远起不来。ABL 试 B 的结局固定是
+ *     "logo 一闪 → 回 fastboot"(已三次实测)。
+ *   ⇒ 任何"自动回退到 B 槽"的设计在这台机器上都是死路,不要再去试。
  *
- * 落点:ABL 的槽位元数据在 GPT 分区表项【属性字段第 7 字节】(属性 bits 48..55)
- *     bits48-49 priority(2bit) | bit50 ACTIVE | bits51-53 retry(3bit)
- *     bit54 successful | bit55 unbootable
- *   双源背书:lk2nd `platform/msm_shared/include/partition_parser.h`
- *            + AOSP `hardware/qcom/bootctrl` `gpt-utils.h`(AB_FLAG_OFFSET = 54)。
- *   本机实测(与 `fastboot getvar all` 逐项相符,读数见 §18.6):
- *     boot_a 属性 0x0077000000000000 → AB 字节 0x77 = prio3|ACTIVE|retry6|successful|bootable
- *     boot_b 属性 0x0032000000000000 → AB 字节 0x32 = prio2|inactive|retry6|!successful|bootable
+ * ★ 正确做法(本实现):**在当前槽里就地恢复已知可用的 boot 镜像**。
+ *   前提:`/data/local/tmp/mars-golden-boot.img` 存在(一份完整可启动的 boot 分区
+ *   镜像;测试前由主机放好)。
+ *   动作:交给内核里已有的 root 用户态助手执行
+ *       dd if=<golden> of=/dev/block/by-name/boot_a bs=1M ; sync ; reboot
+ *   ⇒ 设备自动回到"有 root、有 adb"的系统,全程不需要 fastboot / 插拔,
+ *     也不需要碰 GPT(把写坏分区表这类风险彻底去掉)。
  *
- * 触发:uptime ≥ LOGDUMP_RESCUE_MS 且日志里【没有任何 USB 枚举痕迹】
- *   ("USB_STATE=CONFIGURED" / "configfs-gadget" / "MARS_USB_ENUM_OK")。
- *   好内核 10 秒内一定打出这些行(原厂对照:10.33s `configfs-gadget ... config #1`)
- *   ⇒ 不会误触发;每轮启动最多动作一次。
- *
- * 动作:ACTIVE 挪到另一个槽、把那个槽 retry 拉满 7、清它的 unbootable;
- *   把当前槽标成 unbootable(免得下次又启动这个坏内核)⇒ 改完重算两处 CRC32
- *   写回主/备 GPT ⇒ kernel_restart(NULL) 立即重启。
- *
- * ★ 防乒乓:目标槽若已经是 unbootable,就【不动作】(只记日志)。这样"两槽都是
- *   坏内核"时会停下来等人工,而不是无限对切。
- * ★ 安全:只改属性字节,不改任何 LBA ⇒ 内核内存里的分区表不用 partprobe;
- *   重启后由 ABL 重新读 GPT。写坏也只影响"下次从哪个槽启动",不会动数据分区。
+ * 触发:`uptime ≥ LOGDUMP_RESCUE_MS` 且【这一轮启动里从没出现过 USB 枚举痕迹】。
+ *   好内核 10 秒内一定打出 `configfs-gadget ... config #1`(原厂对照 10.33s)
+ *   ⇒ 不会误触发;每轮启动最多动作一次;目标文件不存在则只记日志、不动作。
  */
 #define LOGDUMP_RESCUE_MS	90000
-#define LOGDUMP_GPT_LBA		4096		/* sde 逻辑块 4096(下面用实际值兜底) */
-#define LOGDUMP_GPT_ATTR_BYTE	54		/* 表项内属性字段第 7 字节 = bits48..55 */
-#define LOGDUMP_GPT_ACTIVE	0x04
-#define LOGDUMP_GPT_RETRY_MASK	0x38		/* bits51..53 */
-#define LOGDUMP_GPT_RETRY_FULL	0x38
-#define LOGDUMP_GPT_UNBOOTABLE	0x80
-#define LOGDUMP_GPT_PRIO_MASK	0x03		/* bits48..49 —— ★ ABL 就是按这个选槽的 */
+#define LOGDUMP_GOLDEN_PATH	"/data/local/tmp/mars-golden-boot.img"
+#define LOGDUMP_BOOT_DEV	"/dev/block/by-name/boot_a"
 
-static bool logdump_rescue_slot = true;
+static bool logdump_rescue_slot = true;	/* 名字保留,语义已改为"回刷当前槽" */
 module_param(logdump_rescue_slot, bool, 0644);
 MODULE_PARM_DESC(logdump_rescue_slot,
-	"没有 USB 枚举时自动把 ACTIVE 槽切到另一个槽并重启(自编内核自救)");
+	"没有 USB 枚举时用 golden 镜像回刷当前 boot 槽并重启(自编内核自救)");
 
 static bool logdump_rescue_done;
 /*
  * ★ 必须"看到就锁存":日志环缓冲只有 256KB,启动中期一次任务转储就能把
  *   10 秒时那条 USB 枚举行冲掉 —— 若等到 90 秒再去日志里找,会误判成"没枚举"
- *   而把好内核切走。logdump 每 100ms 一轮,一定能在它出现时就抓住。
+ *   而把好内核刷掉。logdump 每 100ms 一轮,一定能在它出现时就抓住。
  */
 static bool logdump_usb_seen;
 
-static u32 logdump_crc32(u32 crc, const void *p, size_t len)
+/* 由 root 用户态助手执行:把 golden 镜像 dd 回 boot_a 并重启 */
+static const char *logdump_rescue_cmd =
+	"if [ -f " LOGDUMP_GOLDEN_PATH " ]; then "
+	  "echo 'logdump-rescue: dd golden -> boot_a' > /dev/kmsg; "
+	  "dd if=" LOGDUMP_GOLDEN_PATH " of=" LOGDUMP_BOOT_DEV " bs=1M 2>&1 | while IFS= read -r l; do echo \"logdump-rescue: $l\" > /dev/kmsg; done; "
+	  "sync; sync; "
+	  "echo 'logdump-rescue: reboot' > /dev/kmsg; "
+	  "reboot; "
+	"else "
+	  "echo 'logdump-rescue: golden 镜像不存在,放弃(等人工)' > /dev/kmsg; "
+	"fi";
+
+static void logdump_spawn_rescue(void)
 {
-	return crc32_le(crc, p, len);
-}
+	char *argv[] = { "/system/bin/sh", "-c", (char *)logdump_rescue_cmd, NULL };
+	char *envp[] = { "HOME=/", "PATH=/sbin:/system/sbin:/system/bin:/system/xbin", NULL };
+	int ret;
 
-/* 把 GPT 头里的 4 字节 CRC 字段清零后,按 header_size 重算并写回 */
-static void logdump_gpt_fix_hdr_crc(u8 *h)
-{
-	u32 hsize, crc;
-
-	memcpy(&hsize, h + 12, 4);
-	if (hsize < 92 || hsize > LOGDUMP_GPT_LBA)
-		hsize = 92;
-	memset(h + 16, 0, 4);
-	crc = logdump_crc32(0xFFFFFFFFu, h, hsize) ^ 0xFFFFFFFFu;
-	memcpy(h + 16, &crc, 4);
-}
-
-/* 按 UTF-16LE 比较分区名(表项 +56,最多 36 个 UTF-16 字符) */
-static bool logdump_gpt_name_is(const u8 *entry, const char *name)
-{
-	size_t i, n = strlen(name);
-
-	for (i = 0; i < n; i++) {
-		if (entry[56 + i * 2] != (u8)name[i] || entry[56 + i * 2 + 1] != 0)
-			return false;
-	}
-	return entry[56 + n * 2] == 0 && entry[56 + n * 2 + 1] == 0;
-}
-
-/*
- * 返回 true 表示"已经完成切槽并准备重启"(调用方负责 kernel_restart)。
- * 只在 kthread 上下文调用(会睡眠)。
- */
-static bool logdump_slot_rescue(void)
-{
-	struct file *f;
-	u8 *hdr = NULL, *hdr2 = NULL, *ent = NULL;
-	loff_t pos;
-	u64 pe_lba, alt_lba;
-	u32 nparts, esize, ent_len;
-	int i, cur = -1, tgt = -1;
-	bool ok = false;
-
-	f = filp_open("/dev/block/sde", O_RDWR | O_LARGEFILE, 0);
-	if (IS_ERR(f)) {
-		pr_err("logdump-rescue: 打不开 /dev/block/sde (%ld)\n", PTR_ERR(f));
-		return false;
-	}
-
-	hdr = kmalloc(LOGDUMP_GPT_LBA, GFP_KERNEL);
-	hdr2 = kmalloc(LOGDUMP_GPT_LBA, GFP_KERNEL);
-	if (!hdr || !hdr2)
-		goto out;
-
-	pos = LOGDUMP_GPT_LBA;
-	if (kernel_read(f, hdr, LOGDUMP_GPT_LBA, &pos) != LOGDUMP_GPT_LBA ||
-	    memcmp(hdr, "EFI PART", 8)) {
-		pr_err("logdump-rescue: 主 GPT 头读不到/签名不对\n");
-		goto out;
-	}
-	memcpy(&pe_lba, hdr + 72, 8);
-	memcpy(&nparts, hdr + 80, 4);
-	memcpy(&esize, hdr + 84, 4);
-	memcpy(&alt_lba, hdr + 32, 8);
-	if (!pe_lba || !nparts || esize < 128 || esize > 4096 || nparts > 512) {
-		pr_err("logdump-rescue: GPT 头字段异常(pe_lba=%llu nparts=%u esize=%u)\n",
-		       (unsigned long long)pe_lba, nparts, esize);
-		goto out;
-	}
-	ent_len = nparts * esize;
-	if (ent_len > 256 * 1024) {
-		pr_err("logdump-rescue: 表项太大 %u\n", ent_len);
-		goto out;
-	}
-	ent = kmalloc(ent_len, GFP_KERNEL);
-	if (!ent)
-		goto out;
-
-	pos = pe_lba * LOGDUMP_GPT_LBA;
-	if (kernel_read(f, ent, ent_len, &pos) != ent_len) {
-		pr_err("logdump-rescue: 表项读不出\n");
-		goto out;
-	}
-
-	for (i = 0; i < nparts; i++) {
-		u8 *e = ent + i * esize;
-		u8 ab;
-
-		if (e[0] == 0 && e[1] == 0)
-			continue;
-		if (logdump_gpt_name_is(e, "boot_a"))
-			cur = i;
-		else if (logdump_gpt_name_is(e, "boot_b"))
-			tgt = i;
-		ab = e[LOGDUMP_GPT_ATTR_BYTE];
-		(void)ab;
-	}
-	if (cur < 0 || tgt < 0) {
-		pr_err("logdump-rescue: 找不到 boot_a/boot_b(cur=%d tgt=%d)\n", cur, tgt);
-		goto out;
-	}
-
-	{
-		u8 *ea = ent + cur * esize, *eb = ent + tgt * esize;
-		u8 a = ea[LOGDUMP_GPT_ATTR_BYTE], b = eb[LOGDUMP_GPT_ATTR_BYTE];
-		bool a_active = (a & LOGDUMP_GPT_ACTIVE) != 0;
-		int from, to;
-		u8 *efrom, *eto;
-
-		/* 以 ACTIVE 位判断当前槽(与 fastboot getvar current-slot 一致) */
-		if (a_active) { from = cur; to = tgt; efrom = ea; eto = eb; }
-		else          { from = tgt; to = cur; efrom = eb; eto = ea; }
-
-		pr_emerg("logdump-rescue: 现状 boot_a=0x%02x boot_b=0x%02x(ACTIVE 在 %s)\n",
-			 a, b, from == cur ? "a" : "b");
-
-		if (eto[LOGDUMP_GPT_ATTR_BYTE] & LOGDUMP_GPT_UNBOOTABLE) {
-			pr_emerg("logdump-rescue: 目标槽已是 unbootable ⇒ 不动作(防乒乓,等人工)\n");
-			goto out;
-		}
-
-		/*
-		 * 当前槽:清 ACTIVE + 优先级降到 2 + 标 unbootable(下次别再启动这个坏内核)
-		 * 目标槽:置 ACTIVE + 优先级升到 3 + 清 unbootable + retry 拉满 7
-		 *
-		 * ★★ 2026-10-06 真机实测(两次踩坑换来的):
-		 *   ① ABL 选槽看的是 **priority(bits48-49)**,不是 ACTIVE 位 —— 只把目标槽
-		 *      设成 prio3|active、另一槽不动 ⇒ 平局 ⇒ ABL 仍启动原槽(实测 slot 没变)。
-		 *      必须把另一槽降到 2,目标槽才是唯一最高优先级。
-		 *   ② **只改 boot_a/boot_b 这两个表项**,绝不要去镜像其它 *_a 与 *_b 分区的 ACTIVE 位 ——
-		 *      出厂 GPT 里那些属性本来全是 0,我按"HAL 会镜像"的假设手改过之后,
-		 *      设备变成"logo 一闪就回 fastboot",最后靠
-		 *      `fastboot flash partition:4 gpt_both4.bin`(刷回出厂 GPT)才救回来。
-		 */
-		efrom[LOGDUMP_GPT_ATTR_BYTE] &= (u8)~LOGDUMP_GPT_ACTIVE;
-		efrom[LOGDUMP_GPT_ATTR_BYTE] |= LOGDUMP_GPT_UNBOOTABLE;
-		efrom[LOGDUMP_GPT_ATTR_BYTE] = (efrom[LOGDUMP_GPT_ATTR_BYTE] & ~LOGDUMP_GPT_PRIO_MASK) | 0x02;
-		eto[LOGDUMP_GPT_ATTR_BYTE] |= LOGDUMP_GPT_ACTIVE;
-		eto[LOGDUMP_GPT_ATTR_BYTE] &= (u8)~LOGDUMP_GPT_UNBOOTABLE;
-		eto[LOGDUMP_GPT_ATTR_BYTE] = (eto[LOGDUMP_GPT_ATTR_BYTE] & ~LOGDUMP_GPT_RETRY_MASK)
-					    | LOGDUMP_GPT_RETRY_FULL;
-		eto[LOGDUMP_GPT_ATTR_BYTE] = (eto[LOGDUMP_GPT_ATTR_BYTE] & ~LOGDUMP_GPT_PRIO_MASK) | 0x03;
-		pr_emerg("logdump-rescue: 切换 ACTIVE %s→%s;boot_a=0x%02x boot_b=0x%02x\n",
-			 from == cur ? "a" : "b", to == cur ? "a" : "b",
-			 ea[LOGDUMP_GPT_ATTR_BYTE], eb[LOGDUMP_GPT_ATTR_BYTE]);
-	}
-
-	/* 表项 CRC 写进两份头 */
-	{
-		u32 ecrc = logdump_crc32(0xFFFFFFFFu, ent, ent_len) ^ 0xFFFFFFFFu;
-		memcpy(hdr + 88, &ecrc, 4);
-	}
-
-	/* 读备头 → 同步表项 CRC → 各自重算头 CRC */
-	pos = alt_lba * LOGDUMP_GPT_LBA;
-	if (kernel_read(f, hdr2, LOGDUMP_GPT_LBA, &pos) != LOGDUMP_GPT_LBA ||
-	    memcmp(hdr2, "EFI PART", 8)) {
-		pr_err("logdump-rescue: 备份 GPT 头读不到/签名不对,只写主份\n");
-		logdump_gpt_fix_hdr_crc(hdr);
-		pos = pe_lba * LOGDUMP_GPT_LBA;
-		if (kernel_write(f, ent, ent_len, &pos) != ent_len)
-			goto out;
-		pos = LOGDUMP_GPT_LBA;
-		if (kernel_write(f, hdr, LOGDUMP_GPT_LBA, &pos) != LOGDUMP_GPT_LBA)
-			goto out;
-		vfs_fsync(f, 0);
-		ok = true;
-		goto out;
-	}
-	memcpy(hdr2 + 88, hdr + 88, 4);
-	logdump_gpt_fix_hdr_crc(hdr);
-	logdump_gpt_fix_hdr_crc(hdr2);
-
-	/* 写序:先备份(表项→头),再主份(表项→头) */
-	pos = alt_lba * LOGDUMP_GPT_LBA - ent_len;
-	if (kernel_write(f, ent, ent_len, &pos) != ent_len) {
-		pr_err("logdump-rescue: 写备份表项失败\n");
-		goto out;
-	}
-	pos = alt_lba * LOGDUMP_GPT_LBA;
-	if (kernel_write(f, hdr2, LOGDUMP_GPT_LBA, &pos) != LOGDUMP_GPT_LBA) {
-		pr_err("logdump-rescue: 写备份头失败\n");
-		goto out;
-	}
-	vfs_fsync(f, 0);
-	pos = pe_lba * LOGDUMP_GPT_LBA;
-	if (kernel_write(f, ent, ent_len, &pos) != ent_len) {
-		pr_err("logdump-rescue: 写主表项失败\n");
-		goto out;
-	}
-	pos = LOGDUMP_GPT_LBA;
-	if (kernel_write(f, hdr, LOGDUMP_GPT_LBA, &pos) != LOGDUMP_GPT_LBA) {
-		pr_err("logdump-rescue: 写主头失败\n");
-		goto out;
-	}
-	vfs_fsync(f, 0);
-	pr_emerg("logdump-rescue: ✅ 主/备 GPT 已更新并落盘\n");
-	ok = true;
-out:
-	kfree(ent);
-	kfree(hdr2);
-	kfree(hdr);
-	filp_close(f, NULL);
-	return ok;
+	ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
+	pr_emerg("logdump-rescue: spawn 回刷脚本 ret=%d%s\n",
+		 ret, ret == 0 ? "(成功)" : "(失败)");
 }
 
 static void logdump_once(void)
@@ -1134,9 +934,8 @@ static void logdump_once(void)
 	 */
 	/*
 	 * ★★ 2026-10-06:自编内核自救 —— 优先级【高于】下面那个"自动进 fastboot"。
-	 *   理由:进 fastboot 需要人工插拔(实测:设备切到 bootloader 时从 USB 总线
-	 *   掉下来,主机看不到它),而切回另一个槽能自动回到一个"有 root、有 adb"
-	 *   的系统。判据只看"这一轮启动里有没有出现过 USB 枚举痕迹"(锁存,见上)。
+	 *   判据只看"这一轮启动里有没有出现过 USB 枚举痕迹"(锁存,见上)。
+	 *   动作 = 用 golden 镜像回刷当前 boot 槽并重启(不碰 GPT、不切槽 —— 原因见上方长注释)。
 	 */
 	if (!logdump_usb_seen && len &&
 	    (logdump_memstr(text, len, "USB_STATE=CONFIGURED") ||
@@ -1150,15 +949,10 @@ static void logdump_once(void)
 	    logdump_uptime_ms() >= LOGDUMP_RESCUE_MS) {
 		logdump_rescue_done = true;
 		pr_emerg("logdump-rescue: uptime=%llums 仍无任何 USB 枚举痕迹"
-			 " ⇒ 判定本内核起不来通道,切槽自救\n", logdump_uptime_ms());
+			 " ⇒ 判定本内核起不来通道,用 " LOGDUMP_GOLDEN_PATH " 回刷 " LOGDUMP_BOOT_DEV " 并重启\n",
+			 logdump_uptime_ms());
 		logdump_write_status(count, seq, 0, len, source, 0, "slot-rescue");
-		if (logdump_slot_rescue()) {
-			pr_emerg("logdump-rescue: GPT 已改,准备重启到另一个槽\n");
-			msleep(500);
-			kernel_restart(NULL);
-		} else {
-			pr_err("logdump-rescue: 切槽失败,放弃自动路径(等人工)\n");
-		}
+		logdump_spawn_rescue();
 	}
 	if (logdump_auto_fastboot && !logdump_boot_done && !logdump_auto_fb_done) {
 		u64 up = logdump_uptime_ms();
