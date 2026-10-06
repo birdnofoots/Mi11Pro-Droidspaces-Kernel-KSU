@@ -817,6 +817,7 @@ static void logdump_check_stuck(void)
 #define LOGDUMP_GPT_RETRY_MASK	0x38		/* bits51..53 */
 #define LOGDUMP_GPT_RETRY_FULL	0x38
 #define LOGDUMP_GPT_UNBOOTABLE	0x80
+#define LOGDUMP_GPT_PRIO_MASK	0x03		/* bits48..49 —— ★ ABL 就是按这个选槽的 */
 
 static bool logdump_rescue_slot = true;
 module_param(logdump_rescue_slot, bool, 0644);
@@ -953,14 +954,27 @@ static bool logdump_slot_rescue(void)
 			goto out;
 		}
 
-		/* 当前槽:清 ACTIVE + 标 unbootable —— 下次别再启动这个坏内核 */
+		/*
+		 * 当前槽:清 ACTIVE + 优先级降到 2 + 标 unbootable(下次别再启动这个坏内核)
+		 * 目标槽:置 ACTIVE + 优先级升到 3 + 清 unbootable + retry 拉满 7
+		 *
+		 * ★★ 2026-10-06 真机实测(两次踩坑换来的):
+		 *   ① ABL 选槽看的是 **priority(bits48-49)**,不是 ACTIVE 位 —— 只把目标槽
+		 *      设成 prio3|active、另一槽不动 ⇒ 平局 ⇒ ABL 仍启动原槽(实测 slot 没变)。
+		 *      必须把另一槽降到 2,目标槽才是唯一最高优先级。
+		 *   ② **只改 boot_a/boot_b 这两个表项**,绝不要去镜像其它 *_a 与 *_b 分区的 ACTIVE 位 ——
+		 *      出厂 GPT 里那些属性本来全是 0,我按"HAL 会镜像"的假设手改过之后,
+		 *      设备变成"logo 一闪就回 fastboot",最后靠
+		 *      `fastboot flash partition:4 gpt_both4.bin`(刷回出厂 GPT)才救回来。
+		 */
 		efrom[LOGDUMP_GPT_ATTR_BYTE] &= (u8)~LOGDUMP_GPT_ACTIVE;
 		efrom[LOGDUMP_GPT_ATTR_BYTE] |= LOGDUMP_GPT_UNBOOTABLE;
-		/* 目标槽:置 ACTIVE + 清 unbootable + retry 拉满 7 */
+		efrom[LOGDUMP_GPT_ATTR_BYTE] = (efrom[LOGDUMP_GPT_ATTR_BYTE] & ~LOGDUMP_GPT_PRIO_MASK) | 0x02;
 		eto[LOGDUMP_GPT_ATTR_BYTE] |= LOGDUMP_GPT_ACTIVE;
 		eto[LOGDUMP_GPT_ATTR_BYTE] &= (u8)~LOGDUMP_GPT_UNBOOTABLE;
 		eto[LOGDUMP_GPT_ATTR_BYTE] = (eto[LOGDUMP_GPT_ATTR_BYTE] & ~LOGDUMP_GPT_RETRY_MASK)
 					    | LOGDUMP_GPT_RETRY_FULL;
+		eto[LOGDUMP_GPT_ATTR_BYTE] = (eto[LOGDUMP_GPT_ATTR_BYTE] & ~LOGDUMP_GPT_PRIO_MASK) | 0x03;
 		pr_emerg("logdump-rescue: 切换 ACTIVE %s→%s;boot_a=0x%02x boot_b=0x%02x\n",
 			 from == cur ? "a" : "b", to == cur ? "a" : "b",
 			 ea[LOGDUMP_GPT_ATTR_BYTE], eb[LOGDUMP_GPT_ATTR_BYTE]);
