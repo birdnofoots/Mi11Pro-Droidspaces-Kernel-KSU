@@ -110,12 +110,25 @@
  *   导致 post-fs-data/surfaceflinger/显示全部排在后面 ⇒ 画面永远停在引导器 splash。
  *   而内核环形缓冲只有 256KB(log_buf_len=256K),开机早期的 init 服务启动行
  *   在几十秒后就被冲掉了 ⇒ 读不到"卡在哪个服务"。
- *   做法:在 uptime 到 LOGDUMP_EARLY_MS 时,把当前正文另存一份到 32MB 偏移
+ *   做法:在 uptime 到 LOGDUMP_EARLY_MS 时,把当前正文另存一份到 36MB 偏移
  *   (原厂 logdump 只写开头,刷回原厂后这份快照仍在,可 dd 读回)。
+ *
+ * ★★ 2026-10-06 真机取证后【再提前】+【加一段】:
+ *   run157 自编内核首次真机启动成功(进 MIUI),但没有 USB/WiFi/触屏 ⇒ 无任何通道,
+ *   只能靠本分区取回日志。读回后发现:20s 那份快照里最早的日志行是 12.36s ——
+ *   因为启动中期(kernel_init 之后)有一次约 500KB 的"全任务 + 每 CPU rq 状态"转储,
+ *   把 log_buf_len=256K 的环缓冲整个冲掉了;而 **vendor 模块装载发生在 5~10s**
+ *   (原厂对照:dwc3 1.79s、qti_battery_charger 8.02s、gadget 10.33s),
+ *   正好落在被冲掉的窗口里 ⇒ "哪个模块没装上、报什么错"完全看不见。
+ *   现在改成三段快照:
+ *     4s  → 36MB(0~4s:PHY/regulator/dwc3 探针、early init)
+ *     11s → 40MB(4~11s:★模块装载期,含 4.6s 采集脚本打的 /proc/modules)
+ *     55s → 32MB(现场快照,原样保留)
  */
-#define LOGDUMP_EARLY_MS	20000
-/* ★ 2026-10-05:早期快照改 36MB,避免被 55s SNAP2(32MB)覆盖 —— 否则永远读不到模块装载行 */
+#define LOGDUMP_EARLY_MS	4000
 #define LOGDUMP_EARLY_OFFSET	(36ULL * 1024 * 1024)
+#define LOGDUMP_EARLY2_MS	11000
+#define LOGDUMP_EARLY2_OFFSET	(40ULL * 1024 * 1024)
 /*
  * ★ 2026-10-03 诊断用:开箱现场快照 + 自动回 fastboot。
  *   现象:内核能启动但卡在 ~50s(module_mutex 被某个 vendor 模块 init 永久占住,
@@ -189,6 +202,7 @@ static u64			 logdump_last_dump_ms;
 static bool			 logdump_boot_done;	/* 见到 "Boot completed" */
 static bool			 logdump_auto_fb_done;	/* 已经触发过自动进 fastboot */
 static bool			 logdump_early_done;	/* 早期快照已写 */
+static bool			 logdump_early2_done;	/* 模块装载期快照已写(2026-10-06) */
 static bool			 logdump_snap2_done;	/* 55s 现场快照已写 */
 static bool			 logdump_statedump_done;	/* v4.10:任务转储只做一次 */
 /* v4.10 诊断:由 kernel/module.c 追加的调试钩子 */
@@ -590,12 +604,21 @@ static int logdump_write_log(char *buf, size_t text_off, size_t len, u32 seq,
 		memset(buf + text_off + len, 0, total - LOGDUMP_HDR_MAX - len);
 
 	ret = logdump_write(LOGDUMP_LOG_OFFSET, h, total);
-	/* ★ 开机早期快照(6s):保住 init 服务启动那几行,刷回原厂后仍可读 */
+	/* ★ 开机早期快照(4s):保住 PHY/regulator/dwc3 探针那几行(刷回原厂后仍可读) */
 	if (!logdump_early_done && logdump_uptime_ms() >= LOGDUMP_EARLY_MS) {
 		/* v4.10:写成功才置位;失败下一轮重试(否则 6s 现场永远丢) */
 		if (!logdump_write(LOGDUMP_EARLY_OFFSET, h, total)) {
 			logdump_early_done = true;
 			pr_emerg("logdump: 已写入开机早期快照(%llums, 36MB 偏移)\n",
+				 (unsigned long long)logdump_uptime_ms());
+		}
+	}
+	/* ★ 模块装载期快照(11s):抓住 4~11s —— 必须在启动中期那次大转储(实测 12.36s 起)
+	 *   冲掉环缓冲之前落盘,否则 /proc/modules 与 modprobe 的错误行永远读不到。 */
+	if (!logdump_early2_done && logdump_uptime_ms() >= LOGDUMP_EARLY2_MS) {
+		if (!logdump_write(LOGDUMP_EARLY2_OFFSET, h, total)) {
+			logdump_early2_done = true;
+			pr_emerg("logdump: 已写入模块装载期快照(%llums, 40MB 偏移)\n",
 				 (unsigned long long)logdump_uptime_ms());
 		}
 	}
