@@ -145,20 +145,21 @@ int mi_disp_unregister_client(void *client)
 	return 0;
 }
 
-/* ── ★ 2026-10-05: fts_touch_spi_k2.ko 需要但内核未导出的 2 个 xiaomi_touch 符号 ──
- *   静态矩阵实锤: fts 仅缺 4 符号, 其中 2 个(mi_disp_register/unregister_client)可从
- *   已装载的 msm_drm.ko 取得; 剩下这 2 个只能由 xiaomi_touch 提供。
- *   xiaomi_touch 已 FORCE_Y 内建但源码可能无 EXPORT_SYMBOL ⇒ 这里补桩导出。
- *   若编译报重复定义, 说明真实现在 vmlinux 中 ⇒ 改为在源码加 EXPORT_SYMBOL。
+/* ── ★ 2026-10-06 修正(静态矩阵实锤,见 CHECKLIST §13):这 2 个桩【只能定义、不能导出】──
+ *   fts_touch_spi_k2.ko 需要 last_touch_events_collect / update_fod_press_status;
+ *   而这 2 个名字【同时是原厂 xiaomi_touch.ko 的导出】。
+ *   2026-10-05 曾在这里 EXPORT_SYMBOL ⇒ 内核对 xiaomi_touch.ko 构成占名 ⇒ 原厂模块被拒装
+ *   ⇒ fts 的 modprobe 依赖链(xiaomi_touch)断掉;而且即便 fts 装上,它调到的也只是这里的【空实现】。
+ *   现改为「只定义、不导出」(与上面的 mi_disp_register_client 同一手法):
+ *   ⇒ 原厂 xiaomi_touch.ko 得以装载,并由它把【真实现】提供给 fts。
+ *   ⚠️ 保留定义是为了过链接;若编译报"重复定义",说明真实现已在 vmlinux ⇒ 直接删掉这个桩。
  */
 void last_touch_events_collect(void *data, int len)
 {
 }
-EXPORT_SYMBOL(last_touch_events_collect);
 
 void update_fod_press_status(int value)
 {
 }
-EXPORT_SYMBOL(update_fod_press_status);
 
 
