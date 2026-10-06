@@ -1266,11 +1266,24 @@ jobs:
           common = [k for k in stock if k in ours]
           match = [k for k in common if stock[k] == ours[k]]
           pct = 100.0 * len(match) / max(1, len(common))
+          # ★★ 2026-10-06 护栏:先自证"这次对照真的量到了东西"。
+          #   背景(血泪):run155~run164 连续 8 轮的 CRC-SUMMARY 都是 "0.00% (0/2223)",
+          #   原因是 CONFIG_MODVERSIONS=n ⇒ 我们的 Module.symvers 里【0 条 CRC】
+          #   (报告里的判据行: "跳过 __ksymtab: 条目数不一致 (7056 vs 0)")。
+          #   即:那 8 轮的百分比是【哑的】,却被打印成一个看起来像结论的数字,
+          #   极容易被误读成"兼容率 0%、没救了"。⇒ 数据无效时必须显式自我否定。
+          valid = len(common) >= 100 and len(ours) > 100
+          if not valid:
+              print("::warning::CRC 对照【无效】:可比=%d 本次导出=%d —— 通常是 CONFIG_MODVERSIONS 未开"
+                    "(本次 Module.symvers 无 CRC)。【不要】把下面的百分比当结论!"
+                    % (len(common), len(ours)))
           print("原厂(vendor 114 个 .ko)导出符号 : %d" % len(stock))
           print("本次导出                        : %d" % len(ours))
           print("可比                            : %d" % len(common))
-          print("CRC 完全相同                    : %d = %.2f%%   <- 越高越好,>99%% 说明模块能直接加载"
-                % (len(match), pct))
+          print("CRC 完全相同                    : %d = %.2f%%%s"
+                % (len(match), pct,
+                   "   <- 越高越好,>99% 说明模块能直接加载" if valid
+                   else "   ★★ 无效(本次无 CRC 数据,见上方 warning)"))
           miss = sorted(k for k in stock if k not in ours)
           print("本内核【完全没提供】的符号      : %d   <- 这个才是硬伤,越接近 0 越好" % len(miss))
           if miss:
@@ -1289,7 +1302,9 @@ jobs:
           print("不匹配的前 50 个:")
           print("  " + ", ".join(bad[:50]))
           with open("../artifacts/CRC-SUMMARY.txt", "w") as fh:
-              fh.write("%.2f%% (%d/%d)\n" % (pct, len(match), len(common)))
+              fh.write("%.2f%% (%d/%d)%s\n"
+                       % (pct, len(match), len(common),
+                          "" if valid else "  ★★无效:无可比CRC数据(CONFIG_MODVERSIONS 未开?)"))
           PY
           echo "=== 内核完整性:原厂 2360 个符号里我们导出了多少 ==="
           python3 ../tools/patch-crcs.py ../ref/stock-crcs.txt out/vmlinux --dry-run 2>&1 \
