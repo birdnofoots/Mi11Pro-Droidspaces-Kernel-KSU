@@ -44,11 +44,15 @@ helper = r'''
  *   代价与风险见 CHECKLIST §22.14.O。
  */
 static const char * const mars_mod_allow[] = {
+#ifdef MARS_ALLOW_OVERRIDE
+	MARS_ALLOW_OVERRIDE
+#else
 	"msm_drm",
 	"hwid",
 	"xiaomi_touch",
 	"fts_touch_spi_k2",
 	"qti_battery_charger_main",
+#endif
 	NULL
 };
 static bool mars_module_blocked(const char *name)
@@ -63,6 +67,18 @@ static bool mars_module_blocked(const char *name)
 	return true;
 }
 '''
+
+# ★ 2026-10-06:名单可由环境变量注入 —— 迭代时只改 dispatch 参数,不改代码。
+#   用法: MARS_ALLOW="msm_drm,cnss2,wlan" python3 mod-blacklist.py <kernel_root>
+_allow_env = os.environ.get("MARS_ALLOW", "").strip()
+if _allow_env:
+    _items = [x.strip() for x in _allow_env.split(",") if x.strip()]
+    _macro = "\n".join('\t"%s",' % x for x in _items)
+    helper = helper.replace("#ifdef MARS_ALLOW_OVERRIDE\n\tMARS_ALLOW_OVERRIDE\n#else\n", "")
+    helper = helper.replace("#endif\n", "")
+    helper = helper.replace('\t"msm_drm",\n\t"hwid",\n\t"xiaomi_touch",\n\t"fts_touch_spi_k2",\n\t"qti_battery_charger_main",', _macro)
+    assert _macro.split(',')[0].strip('\t"') in helper, "名单替换失败"
+    print("MARS_ALLOW override: %s" % _items)
 
 m = re.search(r"\n(static\s+)?int\s+check_modinfo\s*\(", s)
 if not m:

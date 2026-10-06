@@ -31,6 +31,10 @@ on:
         options:
           - aosp-clang-11     # 原厂同款: Android clang 11.0.2 r383902b1 (build 6877366)
           - system-clang      # runner 自带 clang-14(仅作对照)
+      allowlist:
+        description: '★ 白名单模块名(逗号分隔,留空=用补丁内的默认 5 项)。例:msm_drm,cnss2,wlan'
+        required: false
+        default: ''
       ksu_tag:
         description: 'KernelSU tag(仅 allbuiltin-ksu 变体使用)'
         required: false
@@ -531,7 +535,7 @@ jobs:
       - name: ★ 注入 mod-blacklist（拒绝挂死的 vendor 模块）
         run: |
           cd kernel
-          python3 ../patches/mod-blacklist.py .
+          MARS_ALLOW="${{ github.event.inputs.allowlist }}" python3 ../patches/mod-blacklist.py .
           grep -n "mars-module-blacklist" kernel/module.c | head -5
           grep -q "mars-module-blacklist" kernel/module.c \
             || { echo "::error::mod-blacklist 未注入"; exit 1; }
