@@ -125,6 +125,17 @@ jobs:
               #     让那次 modprobe 立刻失败而不是卡死。
               "star-stock":       {"defconfig": "vendor/mars_qgki_ds_defconfig",    "directcfg": "1", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "★ F24 L1 内建线 + WLAN/CNSS 黑名单 + 全部补丁(回到 §70 的成功架构)"},
               "star-stock-ksu":   {"defconfig": "vendor/mars_qgki_ds_defconfig",    "directcfg": "1", "lto": "keep", "ksu": "1", "kabi": "0", "desc": "★ F24 同上 + 内建 KernelSU(刷完即 root,便于自诊断/Droidspaces)"},
+              # ★★★ 2026-10-06 F25:【H2' 单变量判别 —— 去掉 logdump】。
+              #   证据(F24 真机 logdump,§22.14.K):5/5 次自编启动的死亡时刻都落在
+              #   logdump 落盘之后 ~0.4s 内 —— 4.12s(4s 快照)/8.16s(8s)/11.36s(11s)/
+              #   run162 12.37s(11s)/run163 4.20s(4s)。
+              #   机制候选:logdump 读 printk 环形缓冲 + 自己 pr_* 输出 + 原始块设备写,
+              #   一旦在持锁/持 logbuf_lock 期间阻塞 ⇒ PMIC 看门狗咬 ⇒ 静默硬复位。
+              #   ⇒ 唯一改动 = 不接入 patches/logdump.c;其余与 F24 完全一致。
+              #   代价:若它仍崩,就没有黑匣子了(本机 /sys/fs/pstore 实测为空,补不了)
+              #        —— 但一旦它【能起来】,我们就有活体系统可诊断(KSU 版还直接有 root)。
+              "star-stock-nolog":    {"defconfig": "vendor/mars_qgki_ds_defconfig", "directcfg": "1", "lto": "keep", "ksu": "0", "kabi": "0", "nologdump": "1", "desc": "★★ F25:同 F24 但【不接 logdump】(判 H2':是不是它把内核写死的)"},
+              "star-stock-nolog-ksu":{"defconfig": "vendor/mars_qgki_ds_defconfig", "directcfg": "1", "lto": "keep", "ksu": "1", "kabi": "0", "nologdump": "1", "desc": "★★ F25 同上 + 内建 KernelSU(若起来就直接有 root 可活体诊断)"},
               # ★★★ 2026-10-06 F21/run168【决定性对照实验】:纯原厂配置、零 Droidspaces 开关、
               #   连 kABI 补丁都不打(kabi=0)、MODVERSIONS 保持原厂 =y。
               #   目的:把「我们内核与原厂 ABI 的 33.77% 匹配率」这个数字归因 ——
@@ -437,6 +448,7 @@ jobs:
           echo "=== 修改后 techpack Makefile 关键行 ==="
           grep -n 'msm_drm[-y]' techpack/display/msm/Makefile | head -6
       - name: 接入 logdump(内核日志落盘)
+        if: ${{ matrix.nologdump != '1' }}
         continue-on-error: true
         run: |
           cd kernel
