@@ -40,11 +40,26 @@ if "mars-module-blacklist" in s:
 
 helper = r'''
 /* mars-module-blacklist
- * 2026-10-06:改为"全部放行"(与原厂一致);只留一个空的黑名单钩子备用。
+ * ★ 2026-10-06 F18/run164:【只拦 WLAN/CNSS 栈】的单一变量实验。
+ *   依据(run163 真机 logdump,见 CHECKLIST §22.12):
+ *     两次自编启动都死在 CNSS/WLAN PCIe 上电重试里 ——
+ *       cnss: Failed to register MSM PCI event, err = -19   (原厂: 无)
+ *       cnss_pci: of_irq_parse_pci: failed with rc=134       (原厂: 无)
+ *       cnss: Retry cnss_bus_init #1/#2                      (原厂: 无)
+ *     而原厂从不进入这条路径。
+ *   名字用【内核模块名】(来自 .ko 里内嵌 struct module 的 name 字段),
+ *   不是文件名 —— 设备 lsmod 实测:
+ *       qca_cld3_wlan.ko -> "wlan"     cnss2.ko -> "cnss2"    icnss2.ko -> "icnss2"
+ *   ★ 绝不拦 "hwid":camera/fts_touch_spi_k2/qti_battery_charger_main/
+ *     icnss2/cnss2 都依赖它,且 LineageOS 把 hwid.ko 列为 mars 的 boot 关键模块。
  * 详细取证见 patches/mod-blacklist.py 顶部注释。
  */
 static const char * const mars_mod_blacklist[] = {
-	/* 目前为空:原厂 111 个模块全部允许装载 */
+	"cnss2",
+	"icnss2",
+	"wlan",
+	"mi_cnss_statistic",
+	"wlan_firmware_service_v01",
 	NULL
 };
 static bool mars_module_blocked(const char *name)
@@ -71,7 +86,7 @@ if not m2:
     print("mod-blacklist: check_modinfo body not found")
     sys.exit(1)
 inject = """
-	/* mars-module-blacklist:全部放行 + 跳过 vermagic 比对(见 patches/mod-blacklist.py) */
+	/* mars-module-blacklist:黑名单外的全部放行 + 跳过 vermagic 比对 */
 	{
 		const char *__mn = (info && info->name) ? info->name : (mod ? mod->name : "?");
 		if (mars_module_blocked(__mn)) {
@@ -84,4 +99,4 @@ inject = """
 s = s[:m2.end()] + inject + s[m2.end():]
 open(path, "w").write(s)
 assert "mars_mod_blacklist[i]" in s
-print("mod-blacklist: 已改为【全部放行】(原厂 .ko 全部可装;vermagic 比对仍跳过)")
+print("mod-blacklist: 已注入【WLAN/CNSS 黑名单】(%d 项);其余放行,vermagic 比对跳过" % (len(re.findall(r'^\t"', helper, re.M))))
