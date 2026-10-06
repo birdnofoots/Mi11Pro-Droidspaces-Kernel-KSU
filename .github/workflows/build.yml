@@ -166,6 +166,13 @@ jobs:
               #     让 init 能真正把 msm_drm/hwid/xiaomi_touch/fts_touch_spi_k2/
               #     qti_battery_charger_main 装进来。
               "star-stock-wl-noflip":{"defconfig": "vendor/mars_qgki_ds_defconfig","directcfg": "1", "noflip": "1", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "★★★ F30:不翻转(=m 原厂)+ 精选白名单 —— 解'内建同名冲突'导致的零尝试"},
+              # ★★★ 2026-10-07 F35:【只带 pmic_glink 修复,去掉 PCIe ABI 修复】—— 隔离 F34 的晚段硬复位。
+              #   证据(F34 logdump): PCIe 修复让链路训练成功(msm_pcie_link_train ✓),
+              #   但 WLAN 平台驱动仍注册失败(wlan_pld: Fail to register pcie driver ✗),
+              #   系统在 55s 后硬复位 ⇒ 疑似又回到"CNSS/WLAN bring-up 损坏 ⇒ 静默硬复位"(H5)。
+              #   而带 root 那次 USB 已枚举出标准 ADB 接口(18d1:d00d / ff:42:03) ⇒
+              #   pmic_glink 修复对"拿到 adb/root 闭环"是有效的 ⇒ 先用它单独跑通闭环。
+              "star-stock-wl-nopcie":{"defconfig": "vendor/mars_qgki_ds_defconfig","directcfg": "1", "noflip": "1", "nompcie": "1", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "★★★ F35:只带 pmic_glink 修复(不含 PCIe ABI 修复) —— 隔离 F34 晚段复位"},
               # ★★★ 2026-10-06 F21/run168【决定性对照实验】:纯原厂配置、零 Droidspaces 开关、
               #   连 kABI 补丁都不打(kabi=0)、MODVERSIONS 保持原厂 =y。
               #   目的:把「我们内核与原厂 ABI 的 33.77% 匹配率」这个数字归因 ——
@@ -556,6 +563,7 @@ jobs:
           grep -n -A4 "case SERVREG_NOTIF_SERVICE_STATE_DOWN_V01" drivers/soc/qcom/pmic_glink.c | head -8
 
       - name: ★★ 对齐 vendor 的 msm_pcie ABI 布局（修 WiFi 的 PCIe 事件登记）
+        if: ${{ matrix.nompcie != '1' }}
         continue-on-error: true
         run: |
           cd kernel
