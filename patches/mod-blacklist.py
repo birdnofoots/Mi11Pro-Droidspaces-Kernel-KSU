@@ -38,10 +38,24 @@ if "mars-module-blacklist" in s:
 
 helper = r'''
 /* mars-module-blacklist
- * ★ F26:精选白名单(mars_mod_allow)。不在名单里的模块一律 -EPERM。
+ * ★ F26:精选白名单(mars_mod_allow)。不在名单里的模块一律拒绝装载。
  *   名单里放行的模块走 return 0(跳过 vermagic/CRC 剩余检查)——
  *   这是权衡的结果:诚实校验在本机等于"什么都装不上"(符号 CRC 只 33.7% 相同)。
  *   代价与风险见 CHECKLIST §22.14.O。
+ *
+ * ★★ F36 关键修正(2026-10-07,真机证据):拒绝时的返回码必须是 -EEXIST,
+ *    不能是 -EPERM。原因:/vendor/bin/modprobe 是 kmod 原版二进制,
+ *    它对依赖模块的装载失败处理是不同的:
+ *      · -EEXIST ⇒ 打印 "module is already loaded" ⇒ 视为【成功】⇒ 继续装目标模块;
+ *      · -EPERM  ⇒ 视为【失败】⇒ modprobe 立刻中止 ⇒ 目标模块(如 qca_cld3_wlan)
+ *        根本不会被 insmod。
+ *    原厂内核里这些同名模块是【内建】的,insmod 自然返回 -EEXIST,
+ *    所以原厂 modprobe 能一路走完;我们返回 -EPERM 就把依赖链打断了。
+ *    证据(F34 真机早期日志):mars-blacklist: skip rmnet_ctl / ipa_fmwk / qmi_helpers
+ *      ⇒ 随后 "exec 24 (modprobe ... qca_cld3_wlan qca_cld3_qca6390) exited with status 1"
+ *      ⇒ "Modules linked in" 里【没有 wlan】。
+ *    ⇒ 改成 -EEXIST 后,保护效果完全不变(模块依旧不会被装载),
+ *      但 modprobe 的依赖链不再中断。
  */
 static const char * const mars_mod_allow[] = {
 #ifdef MARS_ALLOW_OVERRIDE
@@ -95,7 +109,10 @@ inject = """
 		const char *__mn = (info && info->name) ? info->name : (mod ? mod->name : "?");
 		if (mars_module_blocked(__mn)) {
 			pr_info("mars-blacklist: skip %s\\n", __mn);
-			return -EPERM;
+			/* ★ F36:必须 -EEXIST(不是 -EPERM)—— kmod modprobe 只把
+			 *   EEXIST 当成"已加载"从而继续走依赖链;EPERM 会让它中止,
+			 *   导致 qca_cld3_wlan 之类目标模块完全不被告知。 */
+			return -EEXIST;
 		}
 		pr_info("mars-allow: %s\\n", __mn);
 		return 0;
