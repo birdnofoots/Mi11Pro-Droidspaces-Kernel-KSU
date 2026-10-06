@@ -1065,7 +1065,14 @@ jobs:
           fi
           echo "✅ FTRACE_MCOUNT_RECORD 已关,FUNCTION_ERROR_INJECTION 保留"
           echo "=== Droidspaces / WiFi 核心要件(必须内建) ==="
-          CORE="MAC80211 MACVLAN IPVLAN VXLAN NF_TABLES USER_NS PID_NS IPC_NS SYSVIPC POSIX_MQUEUE CGROUP_DEVICE CGROUP_PIDS TMPFS_XATTR OVERLAY_FS VETH BRIDGE SECCOMP_FILTER"
+          # ★ 2026-10-06 修正(依据 Droidspaces 官方 Kernel Configuration Guide,GKI 章节):
+          #   CGROUP_PIDS 从本清单【移除】。官方原话:该项只服务 --pids-limit,
+          #   且 "BREAK the kABI and no patch covers them"(5.15 实测改动 4101 个导出符号 CRC),
+          #   "Without these options Droidspaces still works: --cpus and --pids-limit are
+          #    skipped with a warning"。⇒ 在 GKI 内核上它必须保持原厂值(=未设),
+          #   否则原厂预编译模块按错误偏移运行 ⇒ 静默损坏(我们已实测到无声硬复位)。
+          #   同时补入官方必需要求里我们确实已满足的两项:DEVTMPFS、NETFILTER_XT_MATCH_ADDRTYPE。
+          CORE="MAC80211 MACVLAN IPVLAN VXLAN NF_TABLES USER_NS PID_NS IPC_NS SYSVIPC POSIX_MQUEUE CGROUP_DEVICE TMPFS_XATTR OVERLAY_FS VETH BRIDGE SECCOMP_FILTER DEVTMPFS NETFILTER_XT_MATCH_ADDRTYPE"
           bad=0
           for c in $CORE; do
             v=$(grep -m1 "^CONFIG_${c}=" out/.config | cut -d= -f2)
