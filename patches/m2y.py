@@ -73,9 +73,20 @@ NOFLIP = os.environ.get('M2Y_NOFLIP', '').strip().lower() not in ('', '0', 'no',
 #        让原厂 vendor .ko 能装进来)。
 #      ⚠️ 若某个开关真的编不过,就把它单独加回本列表(并把报错记在下面)。
 DISABLE = (
-    # ★ 关键:关掉符号 CRC 校验 ⇒ 原厂 vendor 模块(WLAN/相机/音频/ADSP)才能装进来。
-    #   vermagic 里的 "modversions " 字样由 patches/vermagic.py 补上。
-    'CONFIG_MODVERSIONS',
+    # ★★ 2026-10-06 F19/run165:【撤销】关掉 CONFIG_MODVERSIONS 的做法。
+    #   权威依据:Droidspaces 官方内核配置指南(GKI 章节)明确写:
+    #     "Do not turn off CONFIG_MODVERSIONS or force-load modules to get past
+    #      the check. The structures really did change, and a stock module would
+    #      read the wrong offsets."
+    #   我们过去 9 轮的做法正是「关 MODVERSIONS + mod-blacklist 里 return 0 强制放行」,
+    #   于是原厂模块被硬塞进一个结构布局可能不同的内核 ⇒ 读写错误偏移 ⇒
+    #   任意子系统静默损坏(观测:无声硬复位,且每次死在某个模块路径里)。
+    #   改回原厂值(=y)后:① CRC 校验说真话,装不上的模块会明确报
+    #   "disagrees about version of symbol",而不是静默损坏;
+    #   ② CI 里那个「kABI CRC 对照」步骤立刻变成刷机前的量化体检
+    #   (MODVERSIONS=n 时 Module.symvers 没有 CRC,该报告是哑的:0.00% / 7056 vs 0)。
+    #   注意:vermagic 里的 "modversions " 字样仍由 patches/vermagic.py 对齐原厂。
+    # 'CONFIG_MODVERSIONS',   # ← 已撤销(保持原厂 =y)
     # ★ 2026-10-02 追加:斩断"子系统异常 → panic → 看门狗咬 → PS_HOLD 硬复位"这条链。
     #   实测(sde59 日志):内核能正常跑到 134 秒、无 panic 输出就硬复位;
     #   关掉这两项后,即便有 oops/SSR 超时也只会【打印并继续】⇒ 日志能留下现场,
