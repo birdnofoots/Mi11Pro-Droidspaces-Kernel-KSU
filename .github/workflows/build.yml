@@ -547,6 +547,14 @@ jobs:
             exit 1
           fi
 
+      - name: ★★ 对齐 vendor 的 msm_pcie ABI 布局（修 WiFi 的 PCIe 事件登记）
+        continue-on-error: true
+        run: |
+          cd kernel
+          python3 ../patches/msm-pcie-hdr.py . || echo "::warning::msm-pcie-hdr 未生效"
+          echo "--- 自证:结构体第一字段 ---"
+          sed -n '/struct msm_pcie_register_event {/,/};/p' include/linux/msm_pcie.h | head -4
+
       - name: ★ 注入 mod-blacklist（拒绝挂死的 vendor 模块）
         run: |
           cd kernel
