@@ -133,10 +133,12 @@ FORCE_Y = (
     'CONFIG_NETFILTER_XT_TARGET_MASQUERADE',
     'CONFIG_IP_NF_NAT',
     'CONFIG_IP_NF_TARGET_MASQUERADE',
-    # ★ 2026-10-05: 必须内建,让 xiaomi_touch 接口符号进 vmlinux
-    #   (=m 时符号不在内核导出表 ⇒ fts_touch_spi_k2 解析不了 ⇒ 触屏永远无效)
-    #   内建后原厂 xiaomi_touch.ko 因占名装不上,但不重要 —— fts 直接取内建符号。
-    'CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE',
+    # ★ 2026-10-06 撤销 2026-10-05 加的 FORCE_Y —— 它反而制造了死锁(静态矩阵实锤,见 CHECKLIST §13):
+    #   内建 ⇒ vmlinux 导出 xiaomi_touch 定义的 9 个符号 ⇒ 原厂 xiaomi_touch.ko 被拒装
+    #        ⇒ fts_touch_spi_k2 的 modprobe 依赖链(→xiaomi_touch)断掉 ⇒ fts 永不装载;
+    #        即便装上,fts 也只能拿到 mi_syms.c 里的【空桩】。
+    #   ⇒ 交回上面的 KEEP:保持 =m,让原厂 xiaomi_touch.ko 装载并提供【真实现】。
+    #   (同一修复还要求 mi_syms.c 里那 2 个桩「只定义、不导出」—— 已在 2026-10-06 一并改掉。)
 )
 
 KILL = ()   # ★ 2026-10-02 22:5x 实测:关掉 CONFIG_CNSS2 会让内核启动前就复位 ⇒ 清空,改用别的办法
