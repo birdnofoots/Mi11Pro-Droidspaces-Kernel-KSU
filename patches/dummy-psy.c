@@ -52,20 +52,35 @@ static int dummy_work_count;
 
 static void touch_force_load(void)
 {
-	static char *envp[] = { "HOME=/", "PATH=/system/bin:/vendor/bin:/sbin", NULL };
-	/* 用 toybox sh 把 stderr 写进 dmesg,方便 logdump 抓原因 */
-	char *argv[] = { "/system/bin/sh", "-c",
-		"/system/bin/insmod /vendor/lib/modules/fts_touch_spi_k2.ko 2>&1 | while read l; do echo \"fts-insmod: $l\" >/dev/kmsg; done; "
-		"echo \"fts-insmod: done $(cat /sys/module/fts_touch_spi_k2/initstate 2>/dev/null)\" >/dev/kmsg",
-		NULL };
+	/* ★★ F29(2026-10-06):改用【/vendor/bin/modprobe】自己装,不再靠 MIUI 的 vendor_modprobe.sh。
+	 * 证据(F26/F28 真机 logdump):
+	 *   · vendor_modprobe.sh 遍历了模块列表,但 fts_touch_spi_k2 / qti_battery_charger_main
+	 *     【连一次装载尝试都没有】(mars-allow 里只见到 msm_drm/hwid/xiaomi_touch/fc0013);
+	 *   · 我们旧的 helper 用 /system/bin/sh + /system/bin/insmod ⇒ 恒返回 65280(255),
+	 *     且它写进 /dev/kmsg 的诊断行一条都没出现 ⇒ 那条路根本走不通;
+	 *   · MIUI 自己在 early-init 就是用 /vendor/bin/modprobe 装模块的 ⇒ 它一定可用。
+	 * 依赖顺序由 modprobe 的 -a 自己解析(modules.dep: fts→xiaomi_touch,hwid,msm_drm)。 */
+	static char *envp[] = { "HOME=/", "PATH=/vendor/bin:/system/bin:/sbin", NULL };
+	char *argv[] = {
+		"/vendor/bin/modprobe", "-a", "-d", "/vendor/lib/modules/",
+		"xiaomi_touch", "fts_touch_spi_k2", "qti_battery_charger_main",
+		NULL
+	};
 	int ret;
-	/* 每次 work 间隔 3s,第 2 次 ≈ 5~6s 后执行(linker64 就绪)。
-	 * 不能用 jiffies 比较 —— INITIAL_JIFFIES 回绕导致判断永远为假。 */
-	if (touch_force_load_done || dummy_work_count < 2)
+
+	/* 只在第 2/4/8/16/32 次 work(≈6/12/24/48/96s)尝试 —— 覆盖 /vendor 挂载后到框架起来的所有时机;
+	 * 成功了也没法从返回值判断(UMH_WAIT_PROC 返回的是内核侧状态,不是进程退出码),
+	 * 所以按固定计划试 5 次就停(modprobe 对已装模块是幂等的,重复无害)。 */
+	if (touch_force_load_done)
 		return;
-	touch_force_load_done = true;
+	if (!(dummy_work_count == 2 || dummy_work_count == 4 || dummy_work_count == 8 ||
+	      dummy_work_count == 16 || dummy_work_count == 32))
+		return;
+
 	ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
-	pr_info("dummy-psy: fts-insmod helper ret=%d\n", ret);
+	pr_info("dummy-psy: modprobe(touch+charger) ret=%d (work_count=%d)\n", ret, dummy_work_count);
+	if (dummy_work_count >= 32)
+		touch_force_load_done = true;
 }
 
 static void dummy_work_fn(struct work_struct *work)
