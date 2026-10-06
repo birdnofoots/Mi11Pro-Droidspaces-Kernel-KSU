@@ -130,6 +130,17 @@
 #define LOGDUMP_EARLY_OFFSET	(36ULL * 1024 * 1024)
 #define LOGDUMP_EARLY2_MS	11000
 #define LOGDUMP_EARLY2_OFFSET	(40ULL * 1024 * 1024)
+/* ★ 2026-10-06 第二轮:再加 8s/20s/30s 三档快照。
+ *   原因(run161 实测):模块装载发生在 11 秒之后(4s/11s 两份里触屏/充电关键模块
+ *   命中全为 0),而 55s/101s 快照只覆盖 27.8s 之后(早期被 12.36s 那次大转储冲掉)
+ *   ⇒ 11~27s 这个窗口完全看不到。这三档专门补它;每份写前显式 print_modules(),
+ *     把那一刻的模块清单钉进日志(方便判断"到底装上了几个")。 */
+#define LOGDUMP_EARLY3_MS	8000
+#define LOGDUMP_EARLY3_OFFSET	(44ULL * 1024 * 1024)
+#define LOGDUMP_EARLY4_MS	20000
+#define LOGDUMP_EARLY4_OFFSET	(48ULL * 1024 * 1024)
+#define LOGDUMP_EARLY5_MS	30000
+#define LOGDUMP_EARLY5_OFFSET	(52ULL * 1024 * 1024)
 /*
  * ★ 2026-10-03 诊断用:开箱现场快照 + 自动回 fastboot。
  *   现象:内核能启动但卡在 ~50s(module_mutex 被某个 vendor 模块 init 永久占住,
@@ -204,6 +215,9 @@ static bool			 logdump_boot_done;	/* 见到 "Boot completed" */
 static bool			 logdump_auto_fb_done;	/* 已经触发过自动进 fastboot */
 static bool			 logdump_early_done;	/* 早期快照已写 */
 static bool			 logdump_early2_done;	/* 模块装载期快照已写(2026-10-06) */
+static bool			 logdump_early3_done;	/* 8s 快照 */
+static bool			 logdump_early4_done;	/* 20s 快照 */
+static bool			 logdump_early5_done;	/* 30s 快照 */
 static bool			 logdump_snap2_done;	/* 55s 现场快照已写 */
 static bool			 logdump_statedump_done;	/* v4.10:任务转储只做一次 */
 /* v4.10 诊断:由 kernel/module.c 追加的调试钩子 */
@@ -620,6 +634,32 @@ static int logdump_write_log(char *buf, size_t text_off, size_t len, u32 seq,
 		if (!logdump_write(LOGDUMP_EARLY2_OFFSET, h, total)) {
 			logdump_early2_done = true;
 			pr_emerg("logdump: 已写入模块装载期快照(%llums, 40MB 偏移)\n",
+				 (unsigned long long)logdump_uptime_ms());
+		}
+	}
+	/* ★ 8s / 20s / 30s 三档(2026-10-06 第二轮):补 11~27s 的模块装载窗口。
+	 *   每档写前先 print_modules(),把"那一刻内核里到底有几个模块"钉进正文。 */
+	if (!logdump_early3_done && logdump_uptime_ms() >= LOGDUMP_EARLY3_MS) {
+		print_modules();
+		if (!logdump_write(LOGDUMP_EARLY3_OFFSET, h, total)) {
+			logdump_early3_done = true;
+			pr_emerg("logdump: 已写入 8s 快照(%llums, 44MB 偏移)\n",
+				 (unsigned long long)logdump_uptime_ms());
+		}
+	}
+	if (!logdump_early4_done && logdump_uptime_ms() >= LOGDUMP_EARLY4_MS) {
+		print_modules();
+		if (!logdump_write(LOGDUMP_EARLY4_OFFSET, h, total)) {
+			logdump_early4_done = true;
+			pr_emerg("logdump: 已写入 20s 快照(%llums, 48MB 偏移)\n",
+				 (unsigned long long)logdump_uptime_ms());
+		}
+	}
+	if (!logdump_early5_done && logdump_uptime_ms() >= LOGDUMP_EARLY5_MS) {
+		print_modules();
+		if (!logdump_write(LOGDUMP_EARLY5_OFFSET, h, total)) {
+			logdump_early5_done = true;
+			pr_emerg("logdump: 已写入 30s 快照(%llums, 52MB 偏移)\n",
 				 (unsigned long long)logdump_uptime_ms());
 		}
 	}
