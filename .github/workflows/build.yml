@@ -547,6 +547,14 @@ jobs:
             exit 1
           fi
 
+      - name: ★★ 对齐 vendor 的 pmic_glink 状态机（修充电器 probe 不触发）
+        continue-on-error: true
+        run: |
+          cd kernel
+          python3 ../patches/pmic-glink-fix.py . || echo "::warning::pmic-glink-fix 未生效"
+          echo "--- 自证:DOWN 分支 ---"
+          grep -n -A4 "case SERVREG_NOTIF_SERVICE_STATE_DOWN_V01" drivers/soc/qcom/pmic_glink.c | head -8
+
       - name: ★★ 对齐 vendor 的 msm_pcie ABI 布局（修 WiFi 的 PCIe 事件登记）
         continue-on-error: true
         run: |
