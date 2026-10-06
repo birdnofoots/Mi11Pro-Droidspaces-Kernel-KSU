@@ -114,6 +114,14 @@ jobs:
               #    ⇒ bootloader 判启动失败 ⇒ fastboot/回退原厂。
               #    ⇒ 正解:保持 =m,让 /vendor 的原厂 .ko 自己装(vermagic 已对齐)。
               "star-stock-raw":   {"defconfig": "vendor/mars_qgki_ds_defconfig",    "directcfg": "1", "noflip": "1", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "★★ 原厂 config + 不翻内建(保持 =m)+ 全部补丁"},
+              # ★★★ 2026-10-06 F21/run168【决定性对照实验】:纯原厂配置、零 Droidspaces 开关、
+              #   连 kABI 补丁都不打(kabi=0)、MODVERSIONS 保持原厂 =y。
+              #   目的:把「我们内核与原厂 ABI 的 33.77% 匹配率」这个数字归因 ——
+              #     · 若本变体 CRC 匹配率仍 ~33% ⇒ 差异来自【树本身/工具链】,
+              #       而不是我们的容器配置 ⇒ MIUI 路线在 ABI 上不可达 ⇒ 转 LOS。
+              #     · 若本变体 CRC 匹配率 >99% ⇒ 是容器配置的代价 ⇒ 按官方 kABI 安全清单
+              #       逐组回滚,直到收敛(每轮只需 35 分钟 CI,不必刷机)。
+              "stock-pure":       {"defconfig": "vendor/mars_stock_pure_defconfig", "directcfg": "1", "noflip": "1", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "★ 纯原厂配置对照(零容器开关/零 kABI 补丁)—— 判定 ABI 差异来自树还是配置"},
               # ★ 诊断:把 panic 时的内核日志写进 boot_a 分区,重启后可以 dd 读出来。
               #   配合 cmdline 里的 androidboot.init_fatal_panic=1,
               #   让 init 的致命失败变成内核 panic → pstore/blk 落盘。
