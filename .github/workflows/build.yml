@@ -121,7 +121,7 @@ jobs:
               #       而不是我们的容器配置 ⇒ MIUI 路线在 ABI 上不可达 ⇒ 转 LOS。
               #     · 若本变体 CRC 匹配率 >99% ⇒ 是容器配置的代价 ⇒ 按官方 kABI 安全清单
               #       逐组回滚,直到收敛(每轮只需 35 分钟 CI,不必刷机)。
-              "stock-pure":       {"defconfig": "vendor/mars_stock_pure_defconfig", "directcfg": "1", "noflip": "1", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "★ 纯原厂配置对照(零容器开关/零 kABI 补丁)—— 判定 ABI 差异来自树还是配置"},
+              "stock-pure":       {"defconfig": "vendor/mars_stock_pure_defconfig", "directcfg": "1", "noflip": "1", "lto": "keep", "ksu": "0", "kabi": "0", "nocore": "1", "desc": "★ 纯原厂配置对照(零容器开关/零 kABI 补丁/跳过全部要件断言)—— 判定 ABI 差异来自树还是配置"},
               # ★ 诊断:把 panic 时的内核日志写进 boot_a 分区,重启后可以 dd 读出来。
               #   配合 cmdline 里的 androidboot.init_fatal_panic=1,
               #   让 init 的致命失败变成内核 panic → pstore/blk 落盘。
@@ -1044,6 +1044,11 @@ jobs:
       - name: ★ 关闭 DYNAMIC_FTRACE(修 struct module ABI 偏移)
         run: |
           cd kernel
+          # ★ 2026-10-06 F21:纯原厂对照变体(stock-pure,nocore=1)必须【完全不动配置】——
+          #   它的唯一目的就是量"这棵树本身"的 ABI 保真度;任何 -e/-d 都会污染该测量。
+          if [ "${{ matrix.nocore }}" = "1" ]; then
+            echo "本变体 nocore=1:跳过全部配置改写(纯原厂对照,只跑 olddefconfig)"
+          else
           ./scripts/config --file out/.config \
             -d DYNAMIC_FTRACE -d DYNAMIC_FTRACE_WITH_REGS -d FTRACE_MCOUNT_RECORD \
             -e DETECT_HUNG_TASK -d BOOTPARAM_HUNG_TASK_PANIC --set-val DEFAULT_HUNG_TASK_TIMEOUT 15 \
@@ -1053,6 +1058,7 @@ jobs:
             -d TOUCHSCREEN_CYPRESS_CYTTSP5 -d TOUCHSCREEN_CYPRESS_CYTTSP5_I2C \
             -d TOUCHSCREEN_CYPRESS_CYTTSP5_LOADER -d TOUCHSCREEN_CYPRESS_CYTTSP5_DEVICE_ACCESS \
             -d TOUCHSCREEN_ST_FTS_V521_SPI
+          fi
           make O=out -j"$(nproc)" CC="$CC" LD="$LD" SUBLEVEL=${SUBLEVEL_OVERRIDE} olddefconfig
           # ★ 关掉树内自带的 触摸/充电 模块:它们 import mi_disp_register_client 等
           #   43 个被取消导出的符号 ⇒ modpost 报 undefined ✗;而设备上用的是 /vendor 里
@@ -1092,14 +1098,20 @@ jobs:
             v=$(grep -m1 "^CONFIG_${c}=" out/.config | cut -d= -f2)
             printf '  %-34s %s\n' "$c" "${v:-无}"
           done
-          if [ "$bad" != "0" ]; then
+          if [ "${{ matrix.nocore }}" = "1" ]; then
+            echo "（本变体 nocore=1:跳过核心要件断言 —— stock-pure 的目的就是零容器开关）"
+          elif [ "$bad" != "0" ]; then
             echo "::error::有 $bad 项 Droidspaces 核心要件不是 =y(设备上没有对应厂商 .ko,必须内建)"
             exit 1
           fi
-          if grep -q "^CONFIG_CFG80211_WEXT=y" out/.config; then
-            echo "::error::CFG80211_WEXT 仍为 y ⇒ struct wireless_dev 布局与原厂不一致"; exit 1
+          if [ "${{ matrix.nocore }}" != "1" ]; then
+            if grep -q "^CONFIG_CFG80211_WEXT=y" out/.config; then
+              echo "::error::CFG80211_WEXT 仍为 y ⇒ struct wireless_dev 布局与原厂不一致"; exit 1
+            fi
+            echo "✅ Droidspaces/WiFi 要件齐备,MAC80211 内建,CFG80211_WEXT 已关"
+          else
+            echo "（本变体 nocore=1:跳过 CFG80211_WEXT 断言）"
           fi
-          echo "✅ Droidspaces/WiFi 要件齐备,MAC80211 内建,CFG80211_WEXT 已关"
 
       # ── 编译 ──────────────────────────────────────────────────
       - name: 编译
@@ -1127,6 +1139,7 @@ jobs:
 
       # ── 断言:那 43 个撞名符号都不能再由内核导出 ──────────────
       - name: ★ 断言 撞名符号已不再由内核导出
+        if: ${{ matrix.nocore != '1' }}
         run: |
           cd kernel
           test -f out/Module.symvers || { echo "::error::没有 out/Module.symvers"; exit 1; }
