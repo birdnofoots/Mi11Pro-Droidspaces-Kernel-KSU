@@ -136,6 +136,17 @@ jobs:
               #        —— 但一旦它【能起来】,我们就有活体系统可诊断(KSU 版还直接有 root)。
               "star-stock-nolog":    {"defconfig": "vendor/mars_qgki_ds_defconfig", "directcfg": "1", "lto": "keep", "ksu": "0", "kabi": "0", "nologdump": "1", "desc": "★★ F25:同 F24 但【不接 logdump】(判 H2':是不是它把内核写死的)"},
               "star-stock-nolog-ksu":{"defconfig": "vendor/mars_qgki_ds_defconfig", "directcfg": "1", "lto": "keep", "ksu": "1", "kabi": "0", "nologdump": "1", "desc": "★★ F25 同上 + 内建 KernelSU(若起来就直接有 root 可活体诊断)"},
+              # ★★★ 2026-10-06 F26:【恢复白名单】—— 本轮真凶定位后的正解。
+              #   证据: 逐补丁 diff 10-04(能进 MIUI) vs 现在,唯一能解释"之后全是硬复位"的差异 =
+              #     mod-blacklist.py 从【白名单(只放行 msm_drm 一个)】改成了【全放行 + 无条件 return 0】。
+              #     全放行 = 把 ~100 个用【另一棵树】编译的原厂 .ko 强塞进内核 ⇒ 读错结构偏移 ⇒ 静默硬复位。
+              #     (Droidspaces 官方指南逐字警告过这件事。)
+              #   本变体 = 精选白名单(msm_drm + hwid + xiaomi_touch + fts_touch_spi_k2 +
+              #     qti_battery_charger_main ⇒ 显示 + 触摸链 + 充电/USB),其余一律拒绝;
+              #     WLAN/CNSS 栈故意不含(最复杂,留到稳定之后再单独加)。
+              #   logdump 保留(这次它不再是嫌疑人,而是黑匣子)。
+              "star-stock-wl":       {"defconfig": "vendor/mars_qgki_ds_defconfig", "directcfg": "1", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "★★★ F26:精选白名单(显示+触摸链+充电)+ logdump,其余 vendor 模块一律拒"},
+              "star-stock-wl-ksu":   {"defconfig": "vendor/mars_qgki_ds_defconfig", "directcfg": "1", "lto": "keep", "ksu": "1", "kabi": "0", "desc": "★★★ F26 同上 + 内建 KernelSU"},
               # ★★★ 2026-10-06 F21/run168【决定性对照实验】:纯原厂配置、零 Droidspaces 开关、
               #   连 kABI 补丁都不打(kabi=0)、MODVERSIONS 保持原厂 =y。
               #   目的:把「我们内核与原厂 ABI 的 33.77% 匹配率」这个数字归因 ——
