@@ -151,6 +151,21 @@ jobs:
               #   logdump 保留(这次它不再是嫌疑人,而是黑匣子)。
               "star-stock-wl":       {"defconfig": "vendor/mars_qgki_ds_defconfig", "directcfg": "1", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "★★★ F26:精选白名单(显示+触摸链+充电)+ logdump,其余 vendor 模块一律拒"},
               "star-stock-wl-ksu":   {"defconfig": "vendor/mars_qgki_ds_defconfig", "directcfg": "1", "lto": "keep", "ksu": "1", "kabi": "0", "desc": "★★★ F26 同上 + 内建 KernelSU"},
+              # ★★★ 2026-10-06 F30:【不翻转 + 精选白名单】—— "零尝试"之谜的解药。
+              #   证据(F29 logdump + config 逐项 diff):
+              #     · 114 个模块里只有 71 个被 init 尝试;没被尝试的 43 个里包含
+              #       fts_touch_spi_k2 / qti_battery_charger_main / cnss2 / qca_cld3_wlan
+              #       / qca_cld3_qca6390 + 一整批音频模块;
+              #     · 我们内核把 15 个驱动翻成了【内建】(SLIMBUS / BTFM_SLIM / SLIMBUS_MSM_NGD
+              #       / MSM_RDBG / MI_HARDWARE_ID / NFC_QTI_I2C / STMVL53L5 / IR_SPI / EDAC_QCOM
+              #       / LEDS_* ...),名字与 vendor 模块【同名】⇒ 装载时在 check_modinfo 之前
+              #       就因"已存在"静默失败(-EEXIST)⇒ 既无 mars-allow 也无 skip 行 ✓ 完美对上观测;
+              #     · 另外 call_usermodehelper 在本内核上【完全不可用】(新旧写法都返回 255,
+              #       5 次尝试全 255,且无 SELinux 记录) ⇒ "内核自己装模块"这条路已判死。
+              #   ⇒ 本变体 = 【保持原厂 =m,不翻转】+ 同样的精选白名单 ⇒ 消除同名冲突,
+              #     让 init 能真正把 msm_drm/hwid/xiaomi_touch/fts_touch_spi_k2/
+              #     qti_battery_charger_main 装进来。
+              "star-stock-wl-noflip":{"defconfig": "vendor/mars_qgki_ds_defconfig","directcfg": "1", "noflip": "1", "lto": "keep", "ksu": "0", "kabi": "0", "desc": "★★★ F30:不翻转(=m 原厂)+ 精选白名单 —— 解'内建同名冲突'导致的零尝试"},
               # ★★★ 2026-10-06 F21/run168【决定性对照实验】:纯原厂配置、零 Droidspaces 开关、
               #   连 kABI 补丁都不打(kabi=0)、MODVERSIONS 保持原厂 =y。
               #   目的:把「我们内核与原厂 ABI 的 33.77% 匹配率」这个数字归因 ——
