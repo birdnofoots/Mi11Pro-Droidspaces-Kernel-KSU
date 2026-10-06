@@ -51,6 +51,7 @@ helper = r'''
  *   (vermagic 比对)+ MODVERSIONS CRC 校验。装不上的模块会【明确报错】而不是静默损坏。
  *   —— 这是把"盲刷"变成"可诊断"的关键一步,也激活 CI 的 kABI CRC 体检。
  * 详细取证见 patches/mod-blacklist.py 顶部注释与 CHECKLIST §22.12/§22.13。
+ */
 static const char * const mars_mod_blacklist[] = {
 	/* F19/run165:空 —— 不拦任何模块,让 CRC/vermagic 校验说真话 */
 	NULL
@@ -90,6 +91,12 @@ inject = """
 	}
 """
 s = s[:m2.end()] + inject + s[m2.end():]
+# ★ 保险(2026-10-06 血的教训):注入的 C 文本必须注释配平 ——
+#   上一次我重写注释头时漏掉结尾的 "*/",导致数组与函数被吞进注释,
+#   编译报 "expected identifier or '(' / use of undeclared identifier"。
+assert helper.count("/*") == helper.count("*/"), \
+    "mod-blacklist: helper 里的 C 注释不配平(/* %d 个, */ %d 个)" % (helper.count("/*"), helper.count("*/"))
+assert helper.count("/*") >= 1
 open(path, "w").write(s)
 assert "mars_mod_blacklist[i]" in s
 print("mod-blacklist: F19/run165 -- blacklist emptied + unconditional return 0 removed (real vermagic/CRC checks restored)")
