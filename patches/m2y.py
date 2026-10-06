@@ -42,6 +42,10 @@ KEEP = (
     #   实锤: p1i7 logdump 里 xiaomi_touch_dev_ioctl 在跑(内建框架),但 0 条 fts/hwid。
     #   保持 =m,让原厂 xiaomi_touch.ko 装载并导出 fts 需要的全部符号。
     'CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE',
+    # ★ 2026-10-07 F42:同理必须保持 =m —— flip 时它会被编成内建,
+    #   内建 hwid 占名但【不导出】get_hw_id_value 等符号 ⇒ 原厂 fts_touch_spi_k2.ko
+    #   拿不到符号 ⇒ 无触屏(真机实证:flip 版 mars-modules.log 里 hwid insmod 'invalid module format' ✗)。
+    'CONFIG_MI_HARDWARE_ID',
 )
 
 # ★ 2026-10-02 新增开关:M2Y_NOFLIP=1 ⇒ 【不把 =m 翻成 =y】,只做 DISABLE。
