@@ -40,26 +40,19 @@ if "mars-module-blacklist" in s:
 
 helper = r'''
 /* mars-module-blacklist
- * ★ 2026-10-06 F18/run164:【只拦 WLAN/CNSS 栈】的单一变量实验。
- *   依据(run163 真机 logdump,见 CHECKLIST §22.12):
- *     两次自编启动都死在 CNSS/WLAN PCIe 上电重试里 ——
- *       cnss: Failed to register MSM PCI event, err = -19   (原厂: 无)
- *       cnss_pci: of_irq_parse_pci: failed with rc=134       (原厂: 无)
- *       cnss: Retry cnss_bus_init #1/#2                      (原厂: 无)
- *     而原厂从不进入这条路径。
- *   名字用【内核模块名】(来自 .ko 里内嵌 struct module 的 name 字段),
- *   不是文件名 —— 设备 lsmod 实测:
- *       qca_cld3_wlan.ko -> "wlan"     cnss2.ko -> "cnss2"    icnss2.ko -> "icnss2"
- *   ★ 绝不拦 "hwid":camera/fts_touch_spi_k2/qti_battery_charger_main/
- *     icnss2/cnss2 都依赖它,且 LineageOS 把 hwid.ko 列为 mars 的 boot 关键模块。
- * 详细取证见 patches/mod-blacklist.py 顶部注释。
- */
+ * ★ 2026-10-06 F19/run165:黑名单【清空】(不拦任何模块),并【取消无条件放行】。
+ *   权威依据:Droidspaces 官方内核配置指南(GKI 章节)原话:
+ *     "Do not turn off CONFIG_MODVERSIONS or force-load modules to get past the
+ *      check. The structures really did change, and a stock module would read
+ *      the wrong offsets."
+ *   过去我们靠本文件末尾那句 `return 0` 跳过 vermagic/CRC 校验,把原厂模块硬塞
+ *   进来 ⇒ 模块可能按错误偏移读写内核结构 ⇒ 静默损坏(症状:无声硬复位)。
+ *   现在:① 黑名单为空;② 不再 return 0 ⇒ 交回内核原本的 check_modinfo
+ *   (vermagic 比对)+ MODVERSIONS CRC 校验。装不上的模块会【明确报错】而不是静默损坏。
+ *   —— 这是把"盲刷"变成"可诊断"的关键一步,也激活 CI 的 kABI CRC 体检。
+ * 详细取证见 patches/mod-blacklist.py 顶部注释与 CHECKLIST §22.12/§22.13。
 static const char * const mars_mod_blacklist[] = {
-	"cnss2",
-	"icnss2",
-	"wlan",
-	"mi_cnss_statistic",
-	"wlan_firmware_service_v01",
+	/* F19/run165:空 —— 不拦任何模块,让 CRC/vermagic 校验说真话 */
 	NULL
 };
 static bool mars_module_blocked(const char *name)
@@ -86,17 +79,17 @@ if not m2:
     print("mod-blacklist: check_modinfo body not found")
     sys.exit(1)
 inject = """
-	/* mars-module-blacklist:黑名单外的全部放行 + 跳过 vermagic 比对 */
+	/* mars-module-blacklist:只做黑名单拦截;【不再】无条件 return 0 --
+	 * 让内核原本的 vermagic 比对与 MODVERSIONS CRC 校验说真话 */
 	{
 		const char *__mn = (info && info->name) ? info->name : (mod ? mod->name : "?");
 		if (mars_module_blocked(__mn)) {
 			pr_info("mars-blocklist: skip %s\\n", __mn);
 			return -EPERM;
 		}
-		return 0;
 	}
 """
 s = s[:m2.end()] + inject + s[m2.end():]
 open(path, "w").write(s)
 assert "mars_mod_blacklist[i]" in s
-print("mod-blacklist: 已注入【WLAN/CNSS 黑名单】(%d 项);其余放行,vermagic 比对跳过" % (len(re.findall(r'^\t"', helper, re.M))))
+print("mod-blacklist: F19/run165 -- blacklist emptied + unconditional return 0 removed (real vermagic/CRC checks restored)")
