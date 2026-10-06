@@ -751,7 +751,7 @@ jobs:
           cd kernel
           python3 - <<'PYEOF'
           import os, re
-          NAMES = ['dss_reg_w', 'dss_reg_r', 'dss_reg_dump', 'msm_dss_ioremap_byname', 'msm_dss_iounmap', 'msm_dss_get_pmic_io_mem', 'msm_dss_get_io_mem', 'msm_dss_clean_io_mem', 'msm_dss_get_io_irq', 'msm_dss_clean_io_irq', 'msm_dss_get_vreg', 'msm_dss_enable_vreg', 'msm_dss_enable_gpio', 'msm_dss_put_clk', 'msm_dss_get_clk', 'msm_dss_single_clk_set_rate', 'msm_dss_clk_set_rate', 'msm_dss_enable_clk', 'sde_i2c_byte_read', 'sde_i2c_byte_write', 'msm_register_vm_event', 'msm_unregister_vm_event', 'sde_rsc_client_create', 'sde_rsc_client_destroy', 'sde_rsc_register_event', 'sde_rsc_unregister_event', 'is_sde_rsc_available', 'get_sde_rsc_current_state', 'sde_rsc_client_state_update', 'sde_rsc_client_vote', 'sde_rsc_client_trigger_vote', 'dsi_bridge_interface_enable', 'msm_ioctl_rmfb2', 'msm_hdcp_register_cb', 'msm_hdcp_notify_topology', 'msm_hdcp_cache_repeater_topology', 'mi_disp_register_client', 'mi_disp_unregister_client', 'mi_disp_notifier_call_chain', 'disp_log_printk', 'disp_log_printk_utc', 'mi_display_pm_suspend', 'mi_disp_set_fod_queue_work', 'thermal_class', 'thermal_message_dev', 'dwc3_core_init', 'xhci_get_sec_event_ring_phys_addr', 'ipa_is_ready']
+          NAMES = ['dss_reg_w', 'dss_reg_r', 'dss_reg_dump', 'msm_dss_ioremap_byname', 'msm_dss_iounmap', 'msm_dss_get_pmic_io_mem', 'msm_dss_get_io_mem', 'msm_dss_clean_io_mem', 'msm_dss_get_io_irq', 'msm_dss_clean_io_irq', 'msm_dss_get_vreg', 'msm_dss_enable_vreg', 'msm_dss_enable_gpio', 'msm_dss_put_clk', 'msm_dss_get_clk', 'msm_dss_single_clk_set_rate', 'msm_dss_clk_set_rate', 'msm_dss_enable_clk', 'sde_i2c_byte_read', 'sde_i2c_byte_write', 'msm_register_vm_event', 'msm_unregister_vm_event', 'sde_rsc_client_create', 'sde_rsc_client_destroy', 'sde_rsc_register_event', 'sde_rsc_unregister_event', 'is_sde_rsc_available', 'get_sde_rsc_current_state', 'sde_rsc_client_state_update', 'sde_rsc_client_vote', 'sde_rsc_client_trigger_vote', 'dsi_bridge_interface_enable', 'msm_ioctl_rmfb2', 'msm_hdcp_register_cb', 'msm_hdcp_notify_topology', 'msm_hdcp_cache_repeater_topology', 'mi_disp_register_client', 'mi_disp_unregister_client', 'mi_disp_notifier_call_chain', 'disp_log_printk', 'disp_log_printk_utc', 'mi_display_pm_suspend', 'mi_disp_set_fod_queue_work', 'dwc3_core_init', 'xhci_get_sec_event_ring_phys_addr', 'ipa_is_ready']
           print('目标符号数:', len(NAMES))
           hits = {}
           for root, dirs, files in os.walk('.'):
@@ -784,6 +784,26 @@ jobs:
           if miss:
               print('WARN 未找到导出语句(可能在头文件):', miss)
           PYEOF
+
+      # ── ★ 导出 MIUI 热控符号(vendor mi_thermal_interface.ko 需要)──────
+      #   star-r-oss 的 drivers/thermal/thermal_core.c 里 thermal_class /
+      #   thermal_message_dev 是 static 且全树无 EXPORT_SYMBOL ⇒ 它们虽被编进
+      #   vmlinux(CONFIG_THERMAL=y / CONFIG_QTI_THERMAL=y)却只进 kallsyms、
+      #   不进 __ksymtab ⇒ 原厂 mi_thermal_interface.ko 报 Unknown symbol。
+      #   原厂内核是全局导出的(kallsyms: thermal_class=D / thermal_message_dev=B)。
+      #   实测 vendor msm_drm.ko 并【不】导出这两个符号(readelf 核对 55 个
+      #   __ksymtab),所以导出它们不会造成 duplicate symbol 拒装。
+      #   ⚠️ 必须排在上面「精确取消撞名导出」步骤【之后】,否则本步刚补的
+      #      EXPORT_SYMBOL 会被那一步按 NAMES 注释掉(静默失效)。
+      #   详见 work/thermal-export-fix/README.md
+      - name: ★ 导出 thermal_class / thermal_message_dev(vendor mi_thermal_interface.ko)
+        run: |
+          cd kernel
+          python3 ../patches/thermal-export.py .
+          echo "--- 导出语句 ---"
+          grep -nE 'EXPORT_SYMBOL\(thermal_(class|message_dev)\)' drivers/thermal/thermal_core.c
+          echo "--- 定义(不应再带 static)---"
+          grep -nE '^(static )?struct (class|device) thermal_(class|message_dev)' drivers/thermal/thermal_core.c
 
       # ── KernelSU ──────────────────────────────────────────────
       - name: 集成 KernelSU
@@ -1096,7 +1116,7 @@ jobs:
           cd kernel
           test -f out/Module.symvers || { echo "::error::没有 out/Module.symvers"; exit 1; }
           python3 - <<'PYEOF'
-          NAMES = ['dss_reg_w', 'dss_reg_r', 'dss_reg_dump', 'msm_dss_ioremap_byname', 'msm_dss_iounmap', 'msm_dss_get_pmic_io_mem', 'msm_dss_get_io_mem', 'msm_dss_clean_io_mem', 'msm_dss_get_io_irq', 'msm_dss_clean_io_irq', 'msm_dss_get_vreg', 'msm_dss_enable_vreg', 'msm_dss_enable_gpio', 'msm_dss_put_clk', 'msm_dss_get_clk', 'msm_dss_single_clk_set_rate', 'msm_dss_clk_set_rate', 'msm_dss_enable_clk', 'sde_i2c_byte_read', 'sde_i2c_byte_write', 'msm_register_vm_event', 'msm_unregister_vm_event', 'sde_rsc_client_create', 'sde_rsc_client_destroy', 'sde_rsc_register_event', 'sde_rsc_unregister_event', 'is_sde_rsc_available', 'get_sde_rsc_current_state', 'sde_rsc_client_state_update', 'sde_rsc_client_vote', 'sde_rsc_client_trigger_vote', 'dsi_bridge_interface_enable', 'msm_ioctl_rmfb2', 'msm_hdcp_register_cb', 'msm_hdcp_notify_topology', 'msm_hdcp_cache_repeater_topology', 'mi_disp_register_client', 'mi_disp_unregister_client', 'mi_disp_notifier_call_chain', 'disp_log_printk', 'disp_log_printk_utc', 'mi_display_pm_suspend', 'mi_disp_set_fod_queue_work', 'thermal_class', 'thermal_message_dev', 'dwc3_core_init', 'xhci_get_sec_event_ring_phys_addr', 'ipa_is_ready']
+          NAMES = ['dss_reg_w', 'dss_reg_r', 'dss_reg_dump', 'msm_dss_ioremap_byname', 'msm_dss_iounmap', 'msm_dss_get_pmic_io_mem', 'msm_dss_get_io_mem', 'msm_dss_clean_io_mem', 'msm_dss_get_io_irq', 'msm_dss_clean_io_irq', 'msm_dss_get_vreg', 'msm_dss_enable_vreg', 'msm_dss_enable_gpio', 'msm_dss_put_clk', 'msm_dss_get_clk', 'msm_dss_single_clk_set_rate', 'msm_dss_clk_set_rate', 'msm_dss_enable_clk', 'sde_i2c_byte_read', 'sde_i2c_byte_write', 'msm_register_vm_event', 'msm_unregister_vm_event', 'sde_rsc_client_create', 'sde_rsc_client_destroy', 'sde_rsc_register_event', 'sde_rsc_unregister_event', 'is_sde_rsc_available', 'get_sde_rsc_current_state', 'sde_rsc_client_state_update', 'sde_rsc_client_vote', 'sde_rsc_client_trigger_vote', 'dsi_bridge_interface_enable', 'msm_ioctl_rmfb2', 'msm_hdcp_register_cb', 'msm_hdcp_notify_topology', 'msm_hdcp_cache_repeater_topology', 'mi_disp_register_client', 'mi_disp_unregister_client', 'mi_disp_notifier_call_chain', 'disp_log_printk', 'disp_log_printk_utc', 'mi_display_pm_suspend', 'mi_disp_set_fod_queue_work', 'dwc3_core_init', 'xhci_get_sec_event_ring_phys_addr', 'ipa_is_ready']
           ours = set()
           for line in open('out/Module.symvers', errors='ignore'):
               f = line.split('\t')
@@ -1109,6 +1129,23 @@ jobs:
                   print('   ', n)
               raise SystemExit(1)
           print('✅ 43 个撞名符号已全部不再由内核导出(vendor msm_drm.ko 可以加载)')
+
+          # ★ 正向断言(2026-10-06 增加):这两个符号必须【由内核导出】。
+          #   vendor mi_thermal_interface.ko(原厂 114 个模块之一,原厂上已加载、
+          #   被 msm_drm 依赖)导入它们;原厂 kallsyms 里 thermal_class=D、
+          #   thermal_message_dev=B。而 star-r-oss 上游把它们的定义写成 static
+          #   且从无 EXPORT_SYMBOL ⇒ 必须由 patches/thermal-export.py 主动补导出。
+          #   它们【不】在上面那份去导出清单里:实测 vendor msm_drm.ko 并不导出它们
+          #   (readelf 核对 55 个 __ksymtab),故导出不会造成 duplicate symbol 拒装。
+          #   详见 work/thermal-export-fix/README.md
+          MUST_EXPORT = ['thermal_class', 'thermal_message_dev']
+          lack = [n for n in MUST_EXPORT if n not in ours]
+          if lack:
+              print('::error::内核没有导出这些 MIUI 热控符号(vendor mi_thermal_interface.ko 会报 Unknown symbol):')
+              for n in lack:
+                  print('   ', n)
+              raise SystemExit(1)
+          print('✅ thermal_class / thermal_message_dev 已由内核导出(供 vendor mi_thermal_interface.ko)')
           PYEOF
 
       # ── 校验 ──────────────────────────────────────────────────
