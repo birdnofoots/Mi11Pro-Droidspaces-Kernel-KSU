@@ -134,3 +134,58 @@ static int __init dummy_psy_init(void)
 	return 0;
 }
 late_initcall(dummy_psy_init);
+
+
+/* ============================================================================
+ * ★ 2026-10-07 20:0x 内建 ADSP 引导触发器(adsp-boot)
+ *
+ * 背景(活体取证):
+ *   原厂 ADSP 由 vendor 模块 adsp_loader_dlkm 触发 —— 它绑 DT 节点
+ *   /soc/qcom,msm-adsp-loader, 并提供 /sys/kernel/boot_adsp 给 init.rc 写
+ *   (init.qcom.rc:87 `write /sys/kernel/boot_adsp/boot 1`)。
+ *   但我们内核编译出的镜像上一旦真加载该模块(及其依赖 apr_dlkm), 内核会崩
+ *   (实测: allowlist 7 项/10 项能开机, 11 项加了 mmhardware 让 adsp_loader+apr
+ *    真正装上后 ⇒ 循环重启)。
+ *
+ * 本触发器的做法(完全绕开 vendor 模块):
+ *   树内的 subsys-pil-tz 驱动已经接管了 lpass 节点(原厂日志里就是它:
+ *   "subsys-pil-tz 17300000.qcom,lpass: adsp: loading"), /sys/class/subsys/subsys_adsp
+ *   也已存在。所以我们只要在合适时机调 subsystem_get("adsp"), 它就会去加载
+ *   adsp 固件 ⇒ ADSP 起来 ⇒ pmic_glink 拿到充电器 client ⇒ qti_battery_charger_main
+ *   probe ⇒ power_supply(usb/battery/wireless) 出现 ⇒ "Avail curr from USB"
+ *   ⇒ dwc3 退出低功耗 ⇒ UDC 注册 ⇒ USB/adb 通。
+ *
+ * 时机: 12 秒后(等 ueventd/init 就绪, 否则 firmware_class 的 sysfs fallback
+ *       没有任何人应答, adsp.mdt 会加载失败); 失败则每 5 秒重试, 最多 24 次。
+ * ==========================================================================*/
+#include <soc/qcom/subsystem_restart.h>
+
+static struct delayed_work adsp_boot_work;
+static int adsp_tries;
+
+static void adsp_boot_fn(struct work_struct *w)
+{
+	struct subsys_device *d;
+
+	if (adsp_tries++ > 24) {
+		pr_err("adsp-boot: 重试 %d 次后放弃\n", adsp_tries);
+		return;
+	}
+	d = subsystem_get("adsp");
+	if (IS_ERR(d)) {
+		pr_err("adsp-boot: subsystem_get(adsp) 失败 rc=%ld (第 %d 次)\n",
+		       PTR_ERR(d), adsp_tries);
+		schedule_delayed_work(&adsp_boot_work, msecs_to_jiffies(5000));
+		return;
+	}
+	pr_info("adsp-boot: 已触发 ADSP 引导(handle=%pK), 等 adsp: loading\n", d);
+}
+
+static int __init adsp_boot_init(void)
+{
+	pr_info("adsp-boot: 注册成功(12s 后触发 subsystem_get(\"adsp\"))\n");
+	INIT_DELAYED_WORK(&adsp_boot_work, adsp_boot_fn);
+	schedule_delayed_work(&adsp_boot_work, msecs_to_jiffies(12000));
+	return 0;
+}
+late_initcall(adsp_boot_init);
