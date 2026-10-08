@@ -58,6 +58,10 @@ on:
         description: '1=接入 mi_syms_los.c(补 mi_display_pm_suspend_callback_set 等 10 个符号)'
         required: false
         default: '0'
+      kabi:
+        description: '1=打 Droidspaces kABI 补丁(SYSVIPC/POSIX_MQUEUE 用 KABI 预留槽, 不改结构体布局)'
+        required: false
+        default: '0'
       modversions:
         description: '分析用: 1=保留 MODVERSIONS=y(生成真实 CRC, 用于与原厂模块比对; 该 Image 不可刷)'
         required: false
@@ -208,6 +212,13 @@ jobs:
           python3 "$GITHUB_WORKSPACE/patches/wlan-gate.py" "$PWD/kernel"
           grep -c 'mars_module_blocked' kernel/kernel/module.c
           grep -q 'mars_wlan_allow' kernel/kernel/module.c && echo "gate 参数已注入"
+
+      - name: 打 Droidspaces kABI 补丁(SYSVIPC/POSIX_MQUEUE 不改 ABI 布局)
+        if: github.event.inputs.kabi == '1'
+        run: |
+          set -e
+          python3 "$GITHUB_WORKSPACE/patches/kabi-sysvipc.py" "$PWD/kernel"
+          python3 "$GITHUB_WORKSPACE/patches/kabi-posix-mqueue.py" "$PWD/kernel"
 
       - name: 忽略 vermagic + 接入 MIUI 符号桩(mi_syms_los)
         if: github.event.inputs.ignore_vermagic == '1' || github.event.inputs.mi_syms == '1'
