@@ -34,6 +34,10 @@ on:
         description: '1=打 mod-blacklist + wlan-gate(默认挡住 WLAN 栈, 保证能进 MIUI)'
         required: false
         default: '0'
+      force_m:
+        description: '逗号分隔的 CONFIG 名, 强制 =m(例: QCA_CLD_WLAN)'
+        required: false
+        default: ''
       modules:
         description: '1=同时编译内核模块并打包(用于把 LOS 自带 WLAN/其他驱动模块推到手机加载)'
         required: false
@@ -129,6 +133,16 @@ jobs:
             echo "  scripts/config $op"
             $SC --file out/.config $op || echo "  (跳过失败项: $op)"
           done
+          if [ -n "${{ github.event.inputs.force_m }}" ]; then
+            IFS=',' read -ra FMS <<< "${{ github.event.inputs.force_m }}"
+            for m in "${FMS[@]}"; do
+              [ -n "$m" ] || continue
+              echo "  force -m $m"
+              $SC --file out/.config -m "$m" || echo "  (跳过 $m)"
+            done
+            $MK olddefconfig
+            for m in "${FMS[@]}"; do grep -q "^CONFIG_$m=m" out/.config || echo "::warning::force_m 未生效: $m"; done
+          fi
           if [ -n "${{ github.event.inputs.force_y }}" ]; then
             IFS=',' read -ra FYS <<< "${{ github.event.inputs.force_y }}"
             for y in "${FYS[@]}"; do
