@@ -58,6 +58,10 @@ on:
         description: '1=接入 mi_syms_los.c(补 mi_display_pm_suspend_callback_set 等 10 个符号)'
         required: false
         default: '0'
+      allbuiltin:
+        description: '1=把 factory config 里所有 =m 驱动翻成 =y(内建; 原厂那些 GKI 模块就变成冗余)'
+        required: false
+        default: '0'
       kabi:
         description: '1=打 Droidspaces kABI 补丁(SYSVIPC/POSIX_MQUEUE 用 KABI 预留槽, 不改结构体布局)'
         required: false
@@ -145,6 +149,16 @@ jobs:
             echo "  scripts/config $op"
             $SC --file out/.config $op || echo "  (跳过失败项: $op)"
           done
+          if [ "${{ github.event.inputs.allbuiltin }}" = "1" ]; then
+            echo "=== allbuiltin: 所有 =m 翻成 =y ==="
+            n=0
+            for sym in $(grep -oE '^CONFIG_[A-Za-z0-9_]+=m' out/.config | cut -d= -f1); do
+              $SC --file out/.config -e "${sym#CONFIG_}" 2>/dev/null && n=$((n+1))
+            done
+            echo "  翻了 $n 个符号"
+            $MK olddefconfig
+            echo "  剩余 =m 个数: $(grep -cE '=m$' out/.config)"
+          fi
           if [ -n "${{ github.event.inputs.force_m }}" ]; then
             IFS=',' read -ra FMS <<< "${{ github.event.inputs.force_m }}"
             for m in "${FMS[@]}"; do
