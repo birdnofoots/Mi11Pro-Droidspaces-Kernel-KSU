@@ -65,3 +65,17 @@ int dsi_display_primary_request_fod_hbm(void)
 {
 	return 0;
 }
+
+/* ── WLAN: 原厂 qca_cld3_wlan.ko 还缺这两个符号(原本由原厂 mi_cnss_statistic.ko 导出) ──
+ *   若走"只放行 qca_cld3_wlan + qca_cld3_qca6390(不放行 mi_cnss_statistic)"的定向门禁,
+ *   就必须由内核补这两个桩,否则模块装不上(Unknown symbol)。
+ *   类型按原厂模块里的实际大小对齐: wow_suspend_type = 1 字节对象; 唤醒函数返回 0。
+ */
+u8 wow_suspend_type;
+EXPORT_SYMBOL(wow_suspend_type);
+
+unsigned long cnss_statistic_wow_wakeup(void)
+{
+	return 0;
+}
+EXPORT_SYMBOL(cnss_statistic_wow_wakeup);
