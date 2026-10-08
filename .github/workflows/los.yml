@@ -34,6 +34,10 @@ on:
         description: '1=打 mod-blacklist + wlan-gate(默认挡住 WLAN 栈, 保证能进 MIUI)'
         required: false
         default: '0'
+      modules:
+        description: '1=同时编译内核模块并打包(用于把 LOS 自带 WLAN/其他驱动模块推到手机加载)'
+        required: false
+        default: '0'
       force_y:
         description: '逗号分隔的 CONFIG 名, 强制 =y(例: QCA_CLD_WLAN,CNSS2,CNSS_QCA6490)'
         required: false
@@ -222,6 +226,27 @@ jobs:
           [ "$rc" = 0 ] || { echo "::error::make 失败 rc=$rc"; exit 1; }
           [ -s out/arch/arm64/boot/Image ] || { echo "::error::没有 Image"; exit 1; }
 
+      - name: 编译内核模块并打包(可选)
+        if: github.event.inputs.modules == '1'
+        run: |
+          set -uo pipefail
+          cd kernel
+          make -k -j"${{ github.event.inputs.jobs }}" O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang LD=ld.lld KCFLAGS="${{ github.event.inputs.kcflags }}" KBUILD_MODPOST_WARN=1 \
+            modules > "$GITHUB_WORKSPACE/modules.log" 2>&1
+          rc=$?
+          echo "modules rc=$rc errors=$(grep -c 'error:' "$GITHUB_WORKSPACE/modules.log" || true)"
+          tail -20 "$GITHUB_WORKSPACE/modules.log"
+          if [ "$rc" != 0 ]; then echo "::warning::modules 编译失败,跳过打包"; else
+            rm -rf "$GITHUB_WORKSPACE/modout"
+            make -s O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld \
+              INSTALL_MOD_PATH="$GITHUB_WORKSPACE/modout" INSTALL_MOD_STRIP=1 modules_install || true
+            ( cd "$GITHUB_WORKSPACE/modout" && tar czf "$GITHUB_WORKSPACE/modules.tgz" lib/modules ) || true
+            ls -l "$GITHUB_WORKSPACE/modules.tgz" || true
+            find "$GITHUB_WORKSPACE/modout" -name '*.ko' | wc -l
+            find "$GITHUB_WORKSPACE/modout" -name '*.ko' | xargs -r basename -a | grep -E 'cnss|qca_cld|icnss|cfg80211|mac80211' | head -10
+          fi
+
       - name: 汇总
         if: always()
         run: |
@@ -248,5 +273,6 @@ jobs:
             kernel/out/System.map
             meta.txt
             build-tail.txt
+            modules.tgz
           if-no-files-found: warn
           retention-days: 14
