@@ -14,11 +14,25 @@ import re
 import sys
 
 root = sys.argv[1] if len(sys.argv) > 1 else "."
+allow = [a.strip() for a in sys.argv[2:] if a.strip()]   # 可选定向例外名单
 path = os.path.join(root, "kernel/module.c")
 s = open(path, errors="ignore").read()
 if "mars-wlan-block" in s:
     print("wlan-block: skip (already applied)")
     sys.exit(0)
+
+allow_tbl = ""
+if allow:
+    allow_tbl = ("\n/* 定向门禁: 只放行这些 WLAN 模块(其余 WLAN 链照挡) */\n"
+                 "static const char * const mars_wlan_allow_names[] = {\n"
+                 + "".join('\t"%s",\n' % a for a in allow)
+                 + "\tNULL\n};\n"
+                 "\nstatic bool mars_wlan_in_allow_names(const char *name)\n"
+                 "{\n\tint i;\n\n"
+                 "\tfor (i = 0; mars_wlan_allow_names[i]; i++)\n"
+                 "\t\tif (!strcmp(name, mars_wlan_allow_names[i]))\n"
+                 "\t\t\treturn true;\n"
+                 "\treturn false;\n}\n")
 
 helper = r'''
 /* mars-wlan-block
@@ -39,14 +53,14 @@ static const char * const mars_wlan_block[] = {
 	"icnss2",
 	NULL
 };
-
+''' + allow_tbl + r'''
 static bool mars_wlan_is_blocked(const char *name)
 {
 	int i;
 
 	if (mars_wlan_allow || !name || !name[0])
 		return false;
-	for (i = 0; mars_wlan_block[i]; i++)
+''' + ("\tif (mars_wlan_in_allow_names(name))\n\t\treturn false;\n" if allow else "") + r'''	for (i = 0; mars_wlan_block[i]; i++)
 		if (!strcmp(name, mars_wlan_block[i]))
 			return true;
 	return false;
@@ -79,5 +93,6 @@ chk = open(path, errors="ignore").read()
 assert "mars_wlan_is_blocked" in chk
 assert "core_param(mars_wlan_allow" in chk
 assert helper.count("/*") == helper.count("*/"), "注释不配平!"
-print("wlan-block: 已注入(黑名单 %d 项 + mars_wlan_allow 运行时开关)"
-      % len(re.findall(r'^\t"', helper, re.M)))
+print("wlan-block: 已注入(黑名单 %d 项 + mars_wlan_allow 运行时开关%s)"
+      % (len(re.findall(r'^\t"', helper, re.M)),
+         (", 定向放行: " + " ".join(allow)) if allow else ""))
