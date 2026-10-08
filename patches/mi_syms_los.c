@@ -8,7 +8,7 @@
  *                          memblock_mem_size_in_gb
  *           msm_drm.ko   : mi_display_pm_suspend_callback_set   ← 缺它 ⇒ 显示模块装不上(黑屏)
  *   另加 qti_battery_charger_main.ko 需要的 power_debug_print_enabled / mi_power_save_battery_cave
- *   (老配方 mi_syms.c 里那批 msm_pcie_*/mhi_force_reset 桩在 LOS 树上【内核已导出】⇒ 绝不能重复导出)
+ *   (老配方 mi_syms.c 里那批 msm_pcie_ 前缀 / mhi_force_reset 桩,在 LOS 树上内核已导出,绝不能重复导出)
  */
 #include <linux/module.h>
 #include <linux/kernel.h>
