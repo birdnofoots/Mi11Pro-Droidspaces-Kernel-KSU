@@ -46,3 +46,22 @@ int ufs_read_desc_param(void) { return 0; }
 EXPORT_SYMBOL(ufs_read_desc_param);
 unsigned long memblock_mem_size_in_gb(void) { return 0; }
 EXPORT_SYMBOL(memblock_mem_size_in_gb);
+
+/* ── allbuiltin(=m 全翻 =y) 时,内建 Xiaomi 胶水(thermal/mi_disp)会引用这些"原厂 msm_drm.ko 私有"符号 ──
+ *   老配方 mi_syms.c 的经验: 这两个 display 符号【只能定义、不能导出】,否则原厂 msm_drm.ko 会被拒装;
+ *   allbuiltin 下原厂 msm_drm.ko 本来就装不进来(与内建显示代码重名),所以这里只做"过链接"的空实现。
+ */
+int mi_disp_register_client(void *client)
+{
+	return 0;
+}
+
+int mi_disp_unregister_client(void *client)
+{
+	return 0;
+}
+
+int dsi_display_primary_request_fod_hbm(void)
+{
+	return 0;
+}
