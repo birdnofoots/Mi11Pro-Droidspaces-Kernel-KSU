@@ -130,6 +130,16 @@ jobs:
           echo "=== 关键 config ==="
           grep -E "^CONFIG_(PID_NS|IPC_NS|USER_NS|SYSVIPC|POSIX_MQUEUE|DEVTMPFS|CGROUPS|CGROUP_DEVICE|MODVERSIONS|LOCALVERSION|CFI_CLANG|LTO_CLANG|THINLTO)" out/.config || true
 
+      - name: 修 LOS 树 UAPI 头(msm-cirrus-playback.h 用了 uint32_t, header check 会失败)
+        run: |
+          H=kernel/techpack/audio/include/uapi/audio/sound/msm-cirrus-playback.h
+          if [ -f "$H" ]; then
+            sed -i 's/\buint32_t\b/__u32/g' "$H"
+            echo "=== 修完后的 struct ==="; grep -n -A6 'struct crus_sp_ioctl_header' "$H" || true
+          else
+            echo "(该树没有这个头,跳过)"
+          fi
+
       - name: 接入 logdump + moddbg(内核日志连续落盘 + 模块表诊断)
         if: github.event.inputs.logdump == '1'
         run: |
