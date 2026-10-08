@@ -27,10 +27,12 @@ m = pat.search(s)
 if not m:
     print("ignore-vermagic: 没找到 same_magic 检查")
     sys.exit(1)
-warn = ('\n\t\t/* mars-ignore-vermagic: 原厂内核不做 vermagic 校验(实测两套 vermagic 并存且 dmesg 0 错误) */'
-        '\n\t\tpr_warn("%s: version magic \'%s\' != \'%s\' (mars: ignored)\\n",'
-        '\n\t\t\tinfo->name, modmagic, vermagic);')
-s = s[:m.end(1)] + warn + s[m.end(1):]
+repl = ('} else if (!same_magic(modmagic, vermagic, info->index.vers)) {\n'
+        '\t\t/* mars-ignore-vermagic: 原厂内核不做 vermagic 校验(实测两套 vermagic 并存且 dmesg 0 错误) */\n'
+        '\t\tpr_warn("%s: version magic \'%s\' != \'%s\' (mars: ignored)\\n",\n'
+        '\t\t\tinfo->name, modmagic, vermagic);\n'
+        '\t}')
+s = s[:m.start()] + repl + s[m.end():]
 
 # 2) try_to_force_load 也放行(万一 vermagic 字段整个缺失)
 s = s.replace('\t\terr = try_to_force_load(mod, "bad vermagic");',
