@@ -34,6 +34,10 @@ on:
         description: '1=打 mod-blacklist + wlan-gate(默认挡住 WLAN 栈, 保证能进 MIUI)'
         required: false
         default: '0'
+      force_y:
+        description: '逗号分隔的 CONFIG 名, 强制 =y(例: QCA_CLD_WLAN,CNSS2,CNSS_QCA6490)'
+        required: false
+        default: ''
       wlanblock:
         description: '1=打 wlan-block(只挡 WLAN 链, 其余模块照原厂放行)'
         required: false
@@ -121,6 +125,16 @@ jobs:
             echo "  scripts/config $op"
             $SC --file out/.config $op || echo "  (跳过失败项: $op)"
           done
+          if [ -n "${{ github.event.inputs.force_y }}" ]; then
+            IFS=',' read -ra FYS <<< "${{ github.event.inputs.force_y }}"
+            for y in "${FYS[@]}"; do
+              [ -n "$y" ] || continue
+              echo "  force -e $y"
+              $SC --file out/.config -e "$y" || echo "  (跳过 $y)"
+            done
+            $MK olddefconfig
+            for y in "${FYS[@]}"; do grep -q "^CONFIG_$y=y" out/.config || echo "::warning::force_y 未生效: $y"; done
+          fi
           if [ "${{ github.event.inputs.modversions }}" = "1" ]; then
             echo "=== 分析模式: 恢复 MODVERSIONS=y 以生成真实 CRC ==="
             $SC --file out/.config -e MODVERSIONS -e ASM_MODVERSIONS
