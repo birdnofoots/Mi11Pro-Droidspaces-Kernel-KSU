@@ -30,6 +30,10 @@ on:
         description: '接入 logdump 连续落盘驱动(1=是)'
         required: false
         default: '1'
+      gates:
+        description: '1=打 mod-blacklist + wlan-gate(默认挡住 WLAN 栈, 保证能进 MIUI)'
+        required: false
+        default: '0'
       modversions:
         description: '分析用: 1=保留 MODVERSIONS=y(生成真实 CRC, 用于与原厂模块比对; 该 Image 不可刷)'
         required: false
@@ -149,6 +153,15 @@ jobs:
           else
             echo "(该树没有这个头,跳过)"
           fi
+
+      - name: 打模块门禁 — mod-blacklist + wlan-gate(只放行显示/触屏/电池, WLAN 栈默认挡住)
+        if: github.event.inputs.gates == '1'
+        run: |
+          set -e
+          python3 "$GITHUB_WORKSPACE/patches/mod-blacklist.py" "$PWD"
+          python3 "$GITHUB_WORKSPACE/patches/wlan-gate.py" "$PWD"
+          grep -c 'mars_module_blocked' kernel/module.c
+          grep -q 'mars_wlan_allow' kernel/module.c && echo "gate 参数已注入"
 
       - name: 接入 logdump + moddbg(内核日志连续落盘 + 模块表诊断)
         if: github.event.inputs.logdump == '1'
