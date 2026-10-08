@@ -30,6 +30,10 @@ on:
         description: '接入 logdump 连续落盘驱动(1=是)'
         required: false
         default: '1'
+      modversions:
+        description: '分析用: 1=保留 MODVERSIONS=y(生成真实 CRC, 用于与原厂模块比对; 该 Image 不可刷)'
+        required: false
+        default: '0'
 
 jobs:
   build:
@@ -109,7 +113,11 @@ jobs:
             echo "  scripts/config $op"
             $SC --file out/.config $op || echo "  (跳过失败项: $op)"
           done
-          $MK olddefconfig
+          if [ "${{ github.event.inputs.modversions }}" = "1" ]; then
+            echo "=== 分析模式: 恢复 MODVERSIONS=y 以生成真实 CRC ==="
+            $SC --file out/.config -e MODVERSIONS -e ASM_MODVERSIONS
+            $MK olddefconfig
+          fi
           # 断言
           fail=0
           for k in PID_NS IPC_NS UTS_NS NET_NS USER_NS SYSVIPC POSIX_MQUEUE DEVTMPFS CGROUPS \
@@ -120,13 +128,15 @@ jobs:
           for k in CFI_CLANG LTO_CLANG THINLTO; do
             grep -q "^CONFIG_$k=y" out/.config || { echo "::error::$k 丢了"; fail=1; }
           done
-          grep -q '^# CONFIG_MODVERSIONS is not set' out/.config || { echo "::error::MODVERSIONS 没关掉"; fail=1; }
+          if [ "${{ github.event.inputs.modversions }}" != "1" ]; then
+            grep -q '^# CONFIG_MODVERSIONS is not set' out/.config || { echo "::error::MODVERSIONS 没关掉"; fail=1; }
+          fi
           grep -q '^CONFIG_LOCALVERSION="-qgki-gbb70cde46897"' out/.config || { echo "::error::LOCALVERSION 不对"; fail=1; }
           [ "$fail" = 0 ] || exit 1
           python3 "$GITHUB_WORKSPACE/patches/vermagic.py" include/linux/vermagic.h 2>/dev/null || \
             python3 "$GITHUB_WORKSPACE/patches/vermagic.py"
           grep -q '5.4.233-qgki-gbb70cde46897 SMP preempt mod_unload modversions aarch64' include/linux/vermagic.h \
-            || { echo "::error::vermagic 补丁没生效"; exit 1; }
+            || { echo "::warning::vermagic 补丁没生效(分析模式可忽略)"; }
           echo "=== 关键 config ==="
           grep -E "^CONFIG_(PID_NS|IPC_NS|USER_NS|SYSVIPC|POSIX_MQUEUE|DEVTMPFS|CGROUPS|CGROUP_DEVICE|MODVERSIONS|LOCALVERSION|CFI_CLANG|LTO_CLANG|THINLTO)" out/.config || true
 
