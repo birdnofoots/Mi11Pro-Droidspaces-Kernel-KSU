@@ -158,10 +158,10 @@ jobs:
         if: github.event.inputs.gates == '1'
         run: |
           set -e
-          python3 "$GITHUB_WORKSPACE/patches/mod-blacklist.py" "$PWD"
-          python3 "$GITHUB_WORKSPACE/patches/wlan-gate.py" "$PWD"
-          grep -c 'mars_module_blocked' kernel/module.c
-          grep -q 'mars_wlan_allow' kernel/module.c && echo "gate 参数已注入"
+          python3 "$GITHUB_WORKSPACE/patches/mod-blacklist.py" "$PWD/kernel"
+          python3 "$GITHUB_WORKSPACE/patches/wlan-gate.py" "$PWD/kernel"
+          grep -c 'mars_module_blocked' kernel/kernel/module.c
+          grep -q 'mars_wlan_allow' kernel/kernel/module.c && echo "gate 参数已注入"
 
       - name: 接入 logdump + moddbg(内核日志连续落盘 + 模块表诊断)
         if: github.event.inputs.logdump == '1'
