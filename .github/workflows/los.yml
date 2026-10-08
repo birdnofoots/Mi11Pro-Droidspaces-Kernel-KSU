@@ -130,14 +130,22 @@ jobs:
           echo "=== 关键 config ==="
           grep -E "^CONFIG_(PID_NS|IPC_NS|USER_NS|SYSVIPC|POSIX_MQUEUE|DEVTMPFS|CGROUPS|CGROUP_DEVICE|MODVERSIONS|LOCALVERSION|CFI_CLANG|LTO_CLANG|THINLTO)" out/.config || true
 
-      - name: 接入 logdump(内核日志连续落盘 → 抓挂死/硬复位现场)
+      - name: 接入 logdump + moddbg(内核日志连续落盘 + 模块表诊断)
         if: github.event.inputs.logdump == '1'
         run: |
           set -e
           cp "$GITHUB_WORKSPACE/patches/logdump.c" kernel/drivers/soc/qcom/logdump.c
           grep -q 'logdump.o' kernel/drivers/soc/qcom/Makefile || echo 'obj-y += logdump.o' >> kernel/drivers/soc/qcom/Makefile
-          tail -3 kernel/drivers/soc/qcom/Makefile
-          ls -l kernel/drivers/soc/qcom/logdump.c
+          if grep -q moddbg_dump kernel/module.c; then echo "moddbg 钩子已存在"; else cat "$GITHUB_WORKSPACE/patches/moddbg.c" >> kernel/module.c; fi
+          grep -n 'moddbg_dump\|moddbg_mutex_owner' kernel/module.c | head -4
+          # 弱兜底: 即使 moddbg 钩子没接上,logdump 也能链接
+          {
+            echo ''
+            echo '/* 弱兜底(CI 追加): moddbg 钩子缺失时也能链接 */'
+            echo 'struct task_struct * __weak moddbg_mutex_owner(void) { return NULL; }'
+            echo 'void __weak moddbg_dump(void) { }'
+          } >> kernel/drivers/soc/qcom/logdump.c
+          tail -4 kernel/drivers/soc/qcom/logdump.c
 
       - name: 编译 Image
         run: |
