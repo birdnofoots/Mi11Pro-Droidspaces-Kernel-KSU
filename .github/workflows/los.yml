@@ -1,0 +1,152 @@
+name: LOS 5.4.242 mars kernel (Droidspaces, MIUI vendor DLKM compatible)
+
+# 目标: 用 LineageOS sm8350 lineage-20 (Xiaomi QGKI 5.4.242) 作新基线，配置用【原厂 /proc/config.gz】
+#       + 容器必需项 + MODVERSIONS=n + vermagic 硬编码成原厂串 ⇒ 让 MIUI /vendor 的 DLKM 能装进来，
+#       从而保留原厂 WiFi/触屏/显示栈，同时拿到容器能力。
+on:
+  workflow_dispatch:
+    inputs:
+      los_ref:
+        description: 'LOS kernel ref'
+        required: false
+        default: 'lineage-20'
+      config:
+        description: 'repo configs/ 下的基础 config'
+        required: false
+        default: 'mars_factory.config'
+      jobs:
+        description: '并行度'
+        required: false
+        default: '4'
+      kcflags:
+        description: 'KCFLAGS'
+        required: false
+        default: '-Wno-error'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libssl-dev libelf-dev zip unzip curl wget cpio rsync \
+            python3 gperf device-tree-compiler libncurses-dev lz4 xz-utils time \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: 安装 clang 11.0.2 (r383902b1, 与原厂 DLKM 同工具链)
+        run: |
+          set -uo pipefail
+          DEST="$HOME/aosp-clang"; rm -rf "$DEST"; mkdir -p "$DEST"; ok=0
+          for r in credits-infra/clang-r383902b1 ruoqing501/clang-r383902b1 qssn70/clang-r383902b1; do
+            U="https://codeload.github.com/${r}/tar.gz/refs/heads/main"
+            echo "=== mirror $U"
+            if curl -fsSL --retry 3 --connect-timeout 20 -o /tmp/clang.tgz "$U"; then
+              rm -rf /tmp/clangx && mkdir -p /tmp/clangx && tar -xzf /tmp/clang.tgz -C /tmp/clangx
+              SRC=$(find /tmp/clangx -maxdepth 1 -mindepth 1 -type d | head -1)
+              if [ -x "$SRC/bin/clang" ]; then cp -a "$SRC"/. "$DEST"/; ok=1; break; fi
+            fi
+          done
+          if [ "$ok" != 1 ]; then
+            for d in clang-r383902b1 clang-r383902b; do
+              U="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/${d}.tar.gz"
+              echo "=== $U"
+              if curl -fsSL --retry 2 --connect-timeout 20 -o /tmp/clang.tgz "$U"; then
+                rm -rf "$DEST"/*; tar -xzf /tmp/clang.tgz -C "$DEST" && ok=1 && break
+              fi
+            done
+          fi
+          [ "$ok" = 1 ] || { echo "::error::clang 11 取不到"; exit 1; }
+          if [ ! -e /usr/lib/x86_64-linux-gnu/libtinfo.so.5 ]; then
+            sudo ln -sf /lib/x86_64-linux-gnu/libtinfo.so.6 /usr/lib/x86_64-linux-gnu/libtinfo.so.5 || true
+          fi
+          echo "$DEST/bin" >> $GITHUB_PATH
+          "$DEST/bin/clang" --version | head -2
+
+      - name: 克隆 LOS 内核
+        run: |
+          set -e
+          git clone --depth 1 -b "${{ github.event.inputs.los_ref }}" \
+            https://github.com/LineageOS/android_kernel_xiaomi_sm8350 kernel
+          cd kernel
+          echo "HEAD: $(git log -1 --format='%h %ci')"
+          head -4 Makefile
+          ls arch/arm64/configs/vendor/ | head -20
+
+      - name: 配置（原厂 config + 容器项 + 模块兼容）
+        run: |
+          set -euo pipefail
+          cd kernel
+          mkdir -p out
+          cp "$GITHUB_WORKSPACE/configs/${{ github.event.inputs.config }}" out/.config
+          MK="make -s O=out ARCH=arm64 CC=clang LD=ld.lld"
+          $MK olddefconfig
+          bash "$GITHUB_WORKSPACE/patches/container-opts.sh" "$PWD"
+          $MK olddefconfig
+          bash "$GITHUB_WORKSPACE/patches/container-opts.sh" "$PWD"
+          # 断言
+          fail=0
+          for k in PID_NS IPC_NS UTS_NS NET_NS USER_NS SYSVIPC POSIX_MQUEUE DEVTMPFS CGROUPS \
+                   CGROUP_DEVICE NAMESPACES VETH SECCOMP_FILTER OVERLAY_FS BRIDGE TMPFS NF_NAT \
+                   IP_NF_TARGET_MASQUERADE; do
+            grep -q "^CONFIG_$k=y" out/.config || { echo "::warning::容器项 $k 不是 y"; fail=1; }
+          done
+          for k in CFI_CLANG LTO_CLANG THINLTO; do
+            grep -q "^CONFIG_$k=y" out/.config || { echo "::error::$k 丢了"; fail=1; }
+          done
+          grep -q '^# CONFIG_MODVERSIONS is not set' out/.config || { echo "::error::MODVERSIONS 没关掉"; fail=1; }
+          grep -q '^CONFIG_LOCALVERSION="-qgki-gbb70cde46897"' out/.config || { echo "::error::LOCALVERSION 不对"; fail=1; }
+          [ "$fail" = 0 ] || exit 1
+          python3 "$GITHUB_WORKSPACE/patches/vermagic.py" include/linux/vermagic.h 2>/dev/null || \
+            python3 "$GITHUB_WORKSPACE/patches/vermagic.py"
+          grep -q '5.4.233-qgki-gbb70cde46897 SMP preempt mod_unload modversions aarch64' include/linux/vermagic.h \
+            || { echo "::error::vermagic 补丁没生效"; exit 1; }
+          echo "=== 关键 config ==="
+          grep -E "^CONFIG_(PID_NS|IPC_NS|USER_NS|SYSVIPC|POSIX_MQUEUE|DEVTMPFS|CGROUPS|CGROUP_DEVICE|MODVERSIONS|LOCALVERSION|CFI_CLANG|LTO_CLANG|THINLTO)" out/.config || true
+
+      - name: 编译 Image
+        run: |
+          set -uo pipefail
+          cd kernel
+          set -x
+          make -k -j"${{ github.event.inputs.jobs }}" O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang LD=ld.lld KCFLAGS="${{ github.event.inputs.kcflags }}" KBUILD_MODPOST_WARN=1 \
+            Image > "$GITHUB_WORKSPACE/build.log" 2>&1
+          rc=$?
+          set +x
+          echo "make rc=$rc  errors=$(grep -c 'error:' "$GITHUB_WORKSPACE/build.log" || true)"
+          tail -60 "$GITHUB_WORKSPACE/build.log"
+          ls -l out/arch/arm64/boot/Image 2>/dev/null || true
+          [ "$rc" = 0 ] || { echo "::error::make 失败 rc=$rc"; exit 1; }
+          [ -s out/arch/arm64/boot/Image ] || { echo "::error::没有 Image"; exit 1; }
+
+      - name: 汇总
+        if: always()
+        run: |
+          {
+            echo "los_ref=${{ github.event.inputs.los_ref }}"
+            echo "config=${{ github.event.inputs.config }}"
+            echo "head=$(git -C kernel log -1 --format='%h %ci' 2>/dev/null)"
+            echo "image_size=$(stat -c%s kernel/out/arch/arm64/boot/Image 2>/dev/null)"
+            echo "image_md5=$(md5sum kernel/out/arch/arm64/boot/Image 2>/dev/null | cut -d' ' -f1)"
+            echo "errors=$(grep -c 'error:' build.log 2>/dev/null || echo 0)"
+            echo "--- unique error sites ---"
+            grep -h 'error:' build.log 2>/dev/null | sed -E 's/^.*kernel\///' | cut -c1-160 | sort -u | head -40
+          } > meta.txt
+          cat meta.txt
+          tail -c 400000 build.log > build-tail.txt 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: los-kernel-${{ github.run_number }}
+          path: |
+            kernel/out/arch/arm64/boot/Image
+            meta.txt
+            build-tail.txt
+          if-no-files-found: warn
+          retention-days: 14
