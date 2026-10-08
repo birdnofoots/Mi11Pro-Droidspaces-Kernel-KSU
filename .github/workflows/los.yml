@@ -185,6 +185,8 @@ jobs:
           name: los-kernel-${{ github.run_number }}
           path: |
             kernel/out/arch/arm64/boot/Image
+            kernel/out/Module.symvers
+            kernel/out/System.map
             meta.txt
             build-tail.txt
           if-no-files-found: warn
