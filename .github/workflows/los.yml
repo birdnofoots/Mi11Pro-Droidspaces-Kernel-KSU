@@ -50,6 +50,14 @@ on:
         description: '1=打 wlan-block(只挡 WLAN 链, 其余模块照原厂放行)'
         required: false
         default: '0'
+      ignore_vermagic:
+        description: '1=让内核忽略 vermagic 不一致(与原厂一致; 272 个模块里 224 个是"无 qgki"串)'
+        required: false
+        default: '0'
+      mi_syms:
+        description: '1=接入 mi_syms_los.c(补 mi_display_pm_suspend_callback_set 等 10 个符号)'
+        required: false
+        default: '0'
       modversions:
         description: '分析用: 1=保留 MODVERSIONS=y(生成真实 CRC, 用于与原厂模块比对; 该 Image 不可刷)'
         required: false
@@ -175,8 +183,10 @@ jobs:
           [ "$fail" = 0 ] || exit 1
           python3 "$GITHUB_WORKSPACE/patches/vermagic.py" include/linux/vermagic.h 2>/dev/null || \
             python3 "$GITHUB_WORKSPACE/patches/vermagic.py"
-          grep -q '5.4.233-qgki-gbb70cde46897 SMP preempt mod_unload modversions aarch64' include/linux/vermagic.h \
-            || { echo "::warning::vermagic 补丁没生效(分析模式可忽略)"; }
+          if [ "${{ github.event.inputs.ignore_vermagic }}" != "1" ]; then
+            grep -q '5.4.233-qgki-gbb70cde46897 SMP preempt mod_unload modversions aarch64' include/linux/vermagic.h \
+              || { echo "::warning::vermagic 补丁没生效(分析模式可忽略)"; }
+          fi
           echo "=== 关键 config ==="
           grep -E "^CONFIG_(PID_NS|IPC_NS|USER_NS|SYSVIPC|POSIX_MQUEUE|DEVTMPFS|CGROUPS|CGROUP_DEVICE|MODVERSIONS|LOCALVERSION|CFI_CLANG|LTO_CLANG|THINLTO)" out/.config || true
 
@@ -198,6 +208,19 @@ jobs:
           python3 "$GITHUB_WORKSPACE/patches/wlan-gate.py" "$PWD/kernel"
           grep -c 'mars_module_blocked' kernel/kernel/module.c
           grep -q 'mars_wlan_allow' kernel/kernel/module.c && echo "gate 参数已注入"
+
+      - name: 忽略 vermagic + 接入 MIUI 符号桩(mi_syms_los)
+        if: github.event.inputs.ignore_vermagic == '1' || github.event.inputs.mi_syms == '1'
+        run: |
+          set -e
+          if [ "${{ github.event.inputs.ignore_vermagic }}" = "1" ]; then
+            python3 "$GITHUB_WORKSPACE/patches/ignore-vermagic.py" "$PWD/kernel"
+          fi
+          if [ "${{ github.event.inputs.mi_syms }}" = "1" ]; then
+            cp "$GITHUB_WORKSPACE/patches/mi_syms_los.c" kernel/drivers/soc/qcom/mi_syms_los.c
+            grep -q 'mi_syms_los.o' kernel/drivers/soc/qcom/Makefile || echo 'obj-y += mi_syms_los.o' >> kernel/drivers/soc/qcom/Makefile
+            tail -2 kernel/drivers/soc/qcom/Makefile
+          fi
 
       - name: 打 WLAN 专用黑名单 — wlan-block(其余模块照原厂放行)
         if: github.event.inputs.wlanblock == '1'
