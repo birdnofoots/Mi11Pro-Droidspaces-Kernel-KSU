@@ -1135,7 +1135,7 @@ static int __init logdump_init(void)
 	return 0;
 }
 
-late_initcall(logdump_init);
+subsys_initcall(logdump_init);   /* ★ 提前: 覆盖更早的挂死(bdev 未就绪时工作队列会自动重试) */
 
 MODULE_DESCRIPTION("periodic kernel log dumper for hard-reset debugging");
 MODULE_LICENSE("GPL v2");
