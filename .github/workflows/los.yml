@@ -34,6 +34,10 @@ on:
         description: '1=打 mod-blacklist + wlan-gate(默认挡住 WLAN 栈, 保证能进 MIUI)'
         required: false
         default: '0'
+      wlanblock:
+        description: '1=打 wlan-block(只挡 WLAN 链, 其余模块照原厂放行)'
+        required: false
+        default: '0'
       modversions:
         description: '分析用: 1=保留 MODVERSIONS=y(生成真实 CRC, 用于与原厂模块比对; 该 Image 不可刷)'
         required: false
@@ -161,6 +165,14 @@ jobs:
           python3 "$GITHUB_WORKSPACE/patches/mod-blacklist.py" "$PWD/kernel"
           python3 "$GITHUB_WORKSPACE/patches/wlan-gate.py" "$PWD/kernel"
           grep -c 'mars_module_blocked' kernel/kernel/module.c
+          grep -q 'mars_wlan_allow' kernel/kernel/module.c && echo "gate 参数已注入"
+
+      - name: 打 WLAN 专用黑名单 — wlan-block(其余模块照原厂放行)
+        if: github.event.inputs.wlanblock == '1'
+        run: |
+          set -e
+          python3 "$GITHUB_WORKSPACE/patches/wlan-block.py" "$PWD/kernel"
+          grep -c 'mars_wlan_is_blocked' kernel/kernel/module.c
           grep -q 'mars_wlan_allow' kernel/kernel/module.c && echo "gate 参数已注入"
 
       - name: 接入 logdump + moddbg(内核日志连续落盘 + 模块表诊断)
