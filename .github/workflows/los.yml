@@ -238,6 +238,16 @@ jobs:
           echo "=== 关键 config ==="
           grep -E "^CONFIG_(PID_NS|IPC_NS|USER_NS|SYSVIPC|POSIX_MQUEUE|DEVTMPFS|CGROUPS|CGROUP_DEVICE|MODVERSIONS|LOCALVERSION|CFI_CLANG|LTO_CLANG|THINLTO)" out/.config || true
 
+      - name: 补 cnss_prealloc 新 API(原厂 qcacld 需要 wcnss_skb_prealloc_get/put 等)
+        if: github.event.inputs.cld_ref != ''
+        run: |
+          set -e
+          H="$GITHUB_WORKSPACE/kernel/include/net/cnss_prealloc.h"
+          if grep -q "wcnss_skb_prealloc_get" "$H"; then echo "已有, 跳过"; exit 0; fi
+          printf '%s\n' '' '/* 兼容: 较新的 qcacld 需要这些 SKB 预分配 API(原厂 cnss_prealloc 提供) */' '#ifndef WCNSS_PRE_SKB_ALLOC_GET_THRESHOLD' '#define WCNSS_PRE_SKB_ALLOC_GET_THRESHOLD 50' '#endif' 'extern struct sk_buff *wcnss_skb_prealloc_get(uint32_t size);' 'extern void wcnss_skb_prealloc_put(struct sk_buff *skb);' >> "$H"
+          tail -8 "$H"
+          grep -c "wcnss_skb_prealloc" "$H"
+
       - name: (可选) 接入 CLO qcacld-3.0 源码 — 自编 WLAN 驱动
         if: github.event.inputs.cld_ref != ''
         run: |
@@ -343,6 +353,15 @@ jobs:
           } >> kernel/drivers/soc/qcom/logdump.c
           tail -4 kernel/drivers/soc/qcom/logdump.c
 
+      - name: 缓存内核构建产物(加速迭代)
+        uses: actions/cache@v4
+        with:
+          path: kernel/out
+          key: kout-${{ github.event.inputs.config }}-${{ github.event.inputs.cld_ref }}-${{ github.event.inputs.hwid_deexport }}-${{ github.sha }}
+          restore-keys: |
+            kout-${{ github.event.inputs.config }}-${{ github.event.inputs.cld_ref }}-${{ github.event.inputs.hwid_deexport }}-
+            kout-${{ github.event.inputs.config }}-${{ github.event.inputs.cld_ref }}-
+
       - name: 编译 Image
         run: |
           set -uo pipefail
@@ -398,8 +417,9 @@ jobs:
           [ -s "$GITHUB_WORKSPACE/cld_makevars.txt" ] && MV=$(tr '\n' ' ' < "$GITHUB_WORKSPACE/cld_makevars.txt")
           cd "$K"
           echo "=== 外部模块方式编译 qcacld (QTI 官方方式) ==="
+          CLDKCFLAGS="-Wno-error -Wno-missing-prototypes -Wno-implicit-function-declaration -Wno-int-conversion -Wno-unused-function -Wno-unused-variable -Wno-format -Wno-pointer-sign -Wno-incompatible-pointer-types -Wno-constant-conversion -Wno-sometimes-uninitialized -Wno-address-of-packed-member -Wno-unused-const-variable -Wno-misleading-indentation -Wno-tautological-compare -Wno-shift-op-parentheses -Wno-parentheses-equality -Wno-bitfield-constant-conversion -Wno-unaligned-access -Wno-enum-conversion"
           make -j"${{ github.event.inputs.jobs }}" O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC=clang LD=ld.lld KBUILD_MODPOST_WARN=1 \
+            CC=clang LD=ld.lld KBUILD_MODPOST_WARN=1 KCFLAGS="$CLDKCFLAGS" \
             M=drivers/staging/qcacld-3.0 MODNAME=wlan \
             WLAN_ROOT="$K/drivers/staging/qcacld-3.0" \
             CONFIG_QCA_WIFI_ISOC=0 CONFIG_QCA_WIFI_2_0=1 CONFIG_QCA_CLD_WLAN=m $MV \
