@@ -66,6 +66,19 @@ int dsi_display_primary_request_fod_hbm(void)
 	return 0;
 }
 
+/* ── 音频: 原厂 mbhc_dlkm.ko(main 目录那份)引用小米私有的 is_early_cons_enabled ──
+ *   实测(2026-10-10): 缺它 ⇒ mbhc_dlkm 装不上 ⇒ wcd_mbhc_* 缺失 ⇒
+ *   wcd938x_dlkm / wcd937x_dlkm / swr_dmic_dlkm / machine_dlkm 连锁全装不上
+ *   ⇒ ASoC 没有声卡(/proc/asound/cards 空) ⇒ 无声。
+ *   小米语义是"early console 是否开启"(打印用), 我们恒返回 false 即可。
+ *   注意: 5.4-gki 目录那份 mbhc_dlkm.ko 不引用它, 所以两套都能用。
+ */
+bool is_early_cons_enabled(void)
+{
+	return false;
+}
+EXPORT_SYMBOL(is_early_cons_enabled);
+
 /* ── 注意: 绝不能再补 wow_suspend_type / cnss_statistic_wow_wakeup ──
  *   这两个符号由【原厂 mi_cnss_statistic.ko】导出,而原厂 qca_cld3_wlan.ko 依赖它。
  *   如果内核也导出这两个名字,原厂 mi_cnss_statistic.ko 会因 "exports duplicate symbol (owned by kernel)"
