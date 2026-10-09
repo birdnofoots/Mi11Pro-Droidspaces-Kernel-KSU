@@ -346,6 +346,7 @@ jobs:
       - name: 编译 Image
         run: |
           set -uo pipefail
+          set +e
           cd kernel
           set -x
           make -k -j"${{ github.event.inputs.jobs }}" O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
@@ -363,6 +364,7 @@ jobs:
         if: github.event.inputs.modules == '1'
         run: |
           set -uo pipefail
+          set +e
           cd kernel
           MV=""
           if [ -s "$GITHUB_WORKSPACE/cld_makevars.txt" ]; then MV=$(tr '\n' ' ' < "$GITHUB_WORKSPACE/cld_makevars.txt"); echo "带 $(wc -l < "$GITHUB_WORKSPACE/cld_makevars.txt") 个 CLD make 变量"; fi
@@ -372,6 +374,8 @@ jobs:
           rc=$?
           echo "modules rc=$rc errors=$(grep -c 'error:' "$GITHUB_WORKSPACE/modules.log" || true)"
           tail -20 "$GITHUB_WORKSPACE/modules.log"
+          echo "--- qcacld 相关错误(最多 30 条) ---"
+          grep -aE 'error:|Error [0-9]+' "$GITHUB_WORKSPACE/modules.log" 2>/dev/null | sed 's|.*/kernel/||' | sort -u | head -30 || true
           if [ "$rc" != 0 ]; then echo "::warning::modules rc=$rc(有失败), 仍尝试打包已产出的模块"; fi
           if true; then
             rm -rf "$GITHUB_WORKSPACE/modout"
@@ -409,6 +413,8 @@ jobs:
             kernel/out/System.map
             meta.txt
             build-tail.txt
+            build.log
+            modules.log
             modules.tgz
           if-no-files-found: warn
           retention-days: 14
