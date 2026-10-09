@@ -62,6 +62,10 @@ on:
         description: '指定 LOS 内核提交(留空=lineage-20 最新). 例: 6bb176e034 = 5.4.233(与原厂模块同源)'
         required: false
         default: ''
+      wlan_profile:
+        description: '1=给 qcacld 钉死 mars 档位(QCA6490/PCIe): HIF_PCI=y、HIF_IPCI/SNOC/USB=n、V2 流控=y+LEGACY=n、IPA_OFFLOAD=n'
+        required: false
+        default: '0'
       hwid_deexport:
         description: '1=去掉内建 hwid 的 EXPORT_SYMBOL, 让原厂 hwid.ko 能装(cnss2 的依赖)'
         required: false
@@ -293,6 +297,14 @@ jobs:
           grep -q '^CONFIG_QCA_CLD_WLAN=m' "$K/out/.config" || { echo "::error::QCA_CLD_WLAN 没打开"; exit 1; }
           echo "OK: QCA_CLD_WLAN=m; 特性片段 $(wc -l < "$GITHUB_WORKSPACE/.config.fragment" 2>/dev/null || echo 0) 行; 剩余 =m 数 $(grep -cE '=m$' "$K/out/.config")"
 
+      - name: WLAN 平台档位覆盖(mars=QCA6490/PCIe)
+        if: github.event.inputs.wlan_profile == '1'
+        run: |
+          set -e
+          python3 "$GITHUB_WORKSPACE/patches/wlan-profile.py" "$PWD/kernel" "$GITHUB_WORKSPACE"
+          echo "--- 树内 default_defconfig 末尾 ---"
+          tail -18 "$PWD/kernel/drivers/staging/qcacld-3.0/configs/default_defconfig" || true
+
       - name: 修 LOS 树 UAPI 头(msm-cirrus-playback.h 用了 uint32_t, header check 会失败)
         run: |
           H=kernel/techpack/audio/include/uapi/audio/sound/msm-cirrus-playback.h
@@ -430,6 +442,8 @@ jobs:
           K="$GITHUB_WORKSPACE/kernel"
           MV=""
           [ -s "$GITHUB_WORKSPACE/cld_makevars.txt" ] && MV=$(tr '\n' ' ' < "$GITHUB_WORKSPACE/cld_makevars.txt")
+          # 平台档位覆盖放最后(make 命令行同名变量后者生效) ⇒ 不再出现 HIF_PCI+HIF_IPCI 同开、V2+LEGACY 同开
+          [ -s "$GITHUB_WORKSPACE/wlan_profile.txt" ] && MV="$MV $(tr '\n' ' ' < "$GITHUB_WORKSPACE/wlan_profile.txt")"
           cd "$K"
           echo "=== 配置状态确认 ==="
           grep -E "QCACLD_WLAN_LFR3|FEATURE_SKB_PRE_ALLOC|IPA_OFFLOAD|TX_FLOW_CONTROL|LITHIUM" out/.config || echo "(这些开关都不在 .config)"
