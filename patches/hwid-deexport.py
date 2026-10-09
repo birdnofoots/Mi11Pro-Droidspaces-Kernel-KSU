@@ -41,3 +41,18 @@ chk = open(path, errors="ignore").read()
 left = len(re.findall(r'^EXPORT_SYMBOL', chk, flags=re.M))
 assert "mars-hwid-deexport" in chk
 print("hwid-deexport: 注释掉 %d 个导出, 剩余有效 EXPORT_SYMBOL=%d" % (n, left))
+# ── 2) 关键: 把我们【内建】的那份改名(默认叫 hwid, 会把 "hwid" 这个模块名占住) ──
+#    内核在装载模块时先查名字: 内建已有 "hwid" ⇒ 原厂 hwid.ko 报 "module is already loaded" 装不上。
+#    改名成 mars_hwid 后: 名字让给原厂模块; 而内建 camera/电池仍调用本地函数(不需要导出) ⇒ 两边都满足。
+mk = os.path.join(root, "drivers/misc/Makefile")
+m2 = re.search(r'^obj-\$\(CONFIG_MI_HARDWARE_ID\)\s*\+=\s*hwid\.o\s*$', open(mk, errors="ignore").read(), re.M)
+if not m2:
+    print("hwid-deexport: Makefile 里没找到 hwid.o 登记")
+    sys.exit(1)
+ms = open(mk, errors="ignore").read()
+ms = ms[:m2.start()] + ("obj-$(CONFIG_MI_HARDWARE_ID)\t+= mars_hwid.o\n"
+                        "mars_hwid-y := hwid.o\t\t# mars-hwid-deexport: 内建那份改名, 把 hwid 名字让给原厂 hwid.ko") + ms[m2.end():]
+open(mk, "w").write(ms)
+assert "mars_hwid-y := hwid.o" in open(mk, errors="ignore").read()
+print("hwid-deexport: Makefile 已改名 -> mars_hwid.o")
+
