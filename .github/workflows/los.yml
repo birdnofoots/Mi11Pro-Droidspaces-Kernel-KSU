@@ -278,7 +278,10 @@ jobs:
             # 两个必须关掉的开关:
             #  说明: LFR3(ROAM_OFFLOAD) 保持供应商默认 y ⇒ 头文件的声明块与真实实现配对; 关掉它反而会命中 #ifndef 回退块造成冲突
             #  FEATURE_SKB_PRE_ALLOC → 会启用新 cnss_prealloc API(wcnss_skb_prealloc_get/put), 原厂/本内核都没有 ⇒ 必须关
-            for SYM in CONFIG_FEATURE_SKB_PRE_ALLOC; do
+            #  IPA_OFFLOAD → 打开会编 components/ipa/**, 其中 wlan_ipa_obj_mgmt_api.c 自己定义 `bool ipa_is_ready(void)`,
+            #                而本内核 include/linux/ipa.h 在 IPA 没编进来时给的是 `static inline bool ipa_is_ready(void)`
+            #                ⇒ redefinition(实测 los39 的 3 个错误之一)。手机用不到 IPA offload, 直接关。
+            for SYM in CONFIG_FEATURE_SKB_PRE_ALLOC CONFIG_IPA_OFFLOAD; do
               sed -i "/^$SYM=/d" "$GITHUB_WORKSPACE/.config.fragment"
               echo "# $SYM is not set" >> "$GITHUB_WORKSPACE/.config.fragment"
               sed -i "/^$SYM=/d" "$GITHUB_WORKSPACE/cld_makevars.txt"
@@ -429,8 +432,8 @@ jobs:
           [ -s "$GITHUB_WORKSPACE/cld_makevars.txt" ] && MV=$(tr '\n' ' ' < "$GITHUB_WORKSPACE/cld_makevars.txt")
           cd "$K"
           echo "=== 配置状态确认 ==="
-          grep -E "QCACLD_WLAN_LFR3|FEATURE_SKB_PRE_ALLOC" out/.config || echo "(两个开关都不在 .config)"
-          grep -E "QCACLD_WLAN_LFR3|FEATURE_SKB_PRE_ALLOC" "$GITHUB_WORKSPACE/cld_makevars.txt" || echo "(makevars 里也没有)"
+          grep -E "QCACLD_WLAN_LFR3|FEATURE_SKB_PRE_ALLOC|IPA_OFFLOAD|TX_FLOW_CONTROL|LITHIUM" out/.config || echo "(这些开关都不在 .config)"
+          grep -E "QCACLD_WLAN_LFR3|FEATURE_SKB_PRE_ALLOC|IPA_OFFLOAD|TX_FLOW_CONTROL|LITHIUM" "$GITHUB_WORKSPACE/cld_makevars.txt" || echo "(makevars 里也没有)"
           echo "=== 外部模块方式编译 qcacld (QTI 官方方式) ===" 
           FWINC="-I$K/drivers/staging/fw-api/hw/qca6490/v1 -I$K/drivers/staging/fw-api/hw/qca6490 -I$K/drivers/staging/fw-api/hw/qca6290/v2 -I$K/drivers/staging/fw-api/fw"
           echo "FWINC=$FWINC"
