@@ -273,9 +273,9 @@ jobs:
           if [ "${{ github.event.inputs.cld_features }}" = "1" ]; then
             python3 "$GITHUB_WORKSPACE/patches/cld-features.py" "$K" "$GITHUB_WORKSPACE"
             # 两个必须关掉的开关:
-            #  1) QCACLD_WLAN_LFR3 → 会 -DWLAN_FEATURE_ROAM_OFFLOAD, 与 wlan_cm_roam_api.h 自身 static inline 回退块冲突
-            #  2) FEATURE_SKB_PRE_ALLOC → 会启用新 cnss_prealloc API(wcnss_skb_prealloc_get/put), 原厂/本内核都没有
-            for SYM in CONFIG_QCACLD_WLAN_LFR3 CONFIG_FEATURE_SKB_PRE_ALLOC; do
+            #  说明: LFR3(ROAM_OFFLOAD) 保持供应商默认 y ⇒ 头文件的声明块与真实实现配对; 关掉它反而会命中 #ifndef 回退块造成冲突
+            #  FEATURE_SKB_PRE_ALLOC → 会启用新 cnss_prealloc API(wcnss_skb_prealloc_get/put), 原厂/本内核都没有 ⇒ 必须关
+            for SYM in CONFIG_FEATURE_SKB_PRE_ALLOC; do
               sed -i "/^$SYM=/d" "$GITHUB_WORKSPACE/.config.fragment"
               echo "# $SYM is not set" >> "$GITHUB_WORKSPACE/.config.fragment"
               sed -i "/^$SYM=/d" "$GITHUB_WORKSPACE/cld_makevars.txt"
@@ -429,7 +429,7 @@ jobs:
           grep -E "QCACLD_WLAN_LFR3|FEATURE_SKB_PRE_ALLOC" out/.config || echo "(两个开关都不在 .config)"
           grep -E "QCACLD_WLAN_LFR3|FEATURE_SKB_PRE_ALLOC" "$GITHUB_WORKSPACE/cld_makevars.txt" || echo "(makevars 里也没有)"
           echo "=== 外部模块方式编译 qcacld (QTI 官方方式) ===" 
-          CLDKCFLAGS="-UWLAN_FEATURE_ROAM_OFFLOAD -UFEATURE_SKB_PRE_ALLOC -Wno-error -Wno-missing-prototypes -Wno-implicit-function-declaration -Wno-int-conversion -Wno-unused-function -Wno-unused-variable -Wno-format -Wno-pointer-sign -Wno-incompatible-pointer-types -Wno-constant-conversion -Wno-sometimes-uninitialized -Wno-address-of-packed-member -Wno-unused-const-variable -Wno-misleading-indentation -Wno-tautological-compare -Wno-shift-op-parentheses -Wno-parentheses-equality -Wno-bitfield-constant-conversion -Wno-enum-conversion -Wno-unknown-warning-option"
+          CLDKCFLAGS="-DWLAN_FEATURE_ROAM_OFFLOAD -Wno-error -Wno-missing-prototypes -Wno-implicit-function-declaration -Wno-int-conversion -Wno-unused-function -Wno-unused-variable -Wno-format -Wno-pointer-sign -Wno-incompatible-pointer-types -Wno-constant-conversion -Wno-sometimes-uninitialized -Wno-address-of-packed-member -Wno-unused-const-variable -Wno-misleading-indentation -Wno-tautological-compare -Wno-shift-op-parentheses -Wno-parentheses-equality -Wno-bitfield-constant-conversion -Wno-enum-conversion -Wno-unknown-warning-option"
           make -j"${{ github.event.inputs.jobs }}" O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             CC=clang LD=ld.lld KBUILD_MODPOST_WARN=1 KCFLAGS="$CLDKCFLAGS" \
             M=drivers/staging/qcacld-3.0 MODNAME=wlan \
