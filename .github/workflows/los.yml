@@ -425,8 +425,11 @@ jobs:
           MV=""
           [ -s "$GITHUB_WORKSPACE/cld_makevars.txt" ] && MV=$(tr '\n' ' ' < "$GITHUB_WORKSPACE/cld_makevars.txt")
           cd "$K"
-          echo "=== 外部模块方式编译 qcacld (QTI 官方方式) ==="
-          CLDKCFLAGS="-Wno-error -Wno-missing-prototypes -Wno-implicit-function-declaration -Wno-int-conversion -Wno-unused-function -Wno-unused-variable -Wno-format -Wno-pointer-sign -Wno-incompatible-pointer-types -Wno-constant-conversion -Wno-sometimes-uninitialized -Wno-address-of-packed-member -Wno-unused-const-variable -Wno-misleading-indentation -Wno-tautological-compare -Wno-shift-op-parentheses -Wno-parentheses-equality -Wno-bitfield-constant-conversion -Wno-enum-conversion -Wno-unknown-warning-option"
+          echo "=== 配置状态确认 ==="
+          grep -E "QCACLD_WLAN_LFR3|FEATURE_SKB_PRE_ALLOC" out/.config || echo "(两个开关都不在 .config)"
+          grep -E "QCACLD_WLAN_LFR3|FEATURE_SKB_PRE_ALLOC" "$GITHUB_WORKSPACE/cld_makevars.txt" || echo "(makevars 里也没有)"
+          echo "=== 外部模块方式编译 qcacld (QTI 官方方式) ===" 
+          CLDKCFLAGS="-UWLAN_FEATURE_ROAM_OFFLOAD -UFEATURE_SKB_PRE_ALLOC -Wno-error -Wno-missing-prototypes -Wno-implicit-function-declaration -Wno-int-conversion -Wno-unused-function -Wno-unused-variable -Wno-format -Wno-pointer-sign -Wno-incompatible-pointer-types -Wno-constant-conversion -Wno-sometimes-uninitialized -Wno-address-of-packed-member -Wno-unused-const-variable -Wno-misleading-indentation -Wno-tautological-compare -Wno-shift-op-parentheses -Wno-parentheses-equality -Wno-bitfield-constant-conversion -Wno-enum-conversion -Wno-unknown-warning-option"
           make -j"${{ github.event.inputs.jobs }}" O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             CC=clang LD=ld.lld KBUILD_MODPOST_WARN=1 KCFLAGS="$CLDKCFLAGS" \
             M=drivers/staging/qcacld-3.0 MODNAME=wlan \
