@@ -50,6 +50,10 @@ on:
         description: '1=打 wlan-block(只挡 WLAN 链, 其余模块照原厂放行)'
         required: false
         default: '0'
+      cld_features:
+        description: '1=使用 qcacld 自带供应商特性集(configs/*.conf, 含 HIF_PCI/PLD_PCIE_CNSS_FLAG 等)'
+        required: false
+        default: '0'
       cld_ref:
         description: '非空=接入 CLO 自编 WLAN 驱动(qcacld-3.0/qca-wifi-host-cmn/fw-api 的分支名, 例 LA.UM.9.14.1.c30)'
         required: false
@@ -258,6 +262,20 @@ jobs:
           mv /tmp/k.tmp Kconfig
           printf '%s\n' 'obj-$(CONFIG_QCA_CLD_WLAN) += qcacld-3.0/' 'obj-$(CONFIG_QCA_WIFI_HOST_CMN) += qca-wifi-host-cmn/' 'obj-$(CONFIG_WLAN_FW_API) += fw-api/' >> Makefile
           tail -6 Makefile
+          cd ..
+          if [ "${{ github.event.inputs.cld_features }}" = "1" ]; then
+            echo "=== 应用 qcacld 供应商特性集 ==="
+            python3 "$GITHUB_WORKSPACE/patches/cld-features.py" "$PWD/kernel" "$GITHUB_WORKSPACE"
+            head -5 "$GITHUB_WORKSPACE/.config.fragment"
+            cat "$GITHUB_WORKSPACE/.config.fragment" >> out/.config
+            ( cd kernel && make -s O=out ARCH=arm64 olddefconfig ) || true
+            echo "QCA_CLD_WLAN: $(grep -E '^CONFIG_QCA_CLD_WLAN' out/.config || true)"
+            echo "HIF_PCI(kernel cfg): $(grep -E '^CONFIG_HIF_PCI' out/.config || true)"
+            echo "make 变量条数: $(wc -l < "$GITHUB_WORKSPACE/cld_makevars.txt")"
+          fi
+          cd kernel
+          sed -i 's/^# CONFIG_QCA_CLD_WLAN is not set/CONFIG_QCA_CLD_WLAN=m/' out/.config 2>/dev/null || true
+          grep -E '^CONFIG_QCA_CLD_WLAN' out/.config || echo "(QCA_CLD_WLAN 未设置!)"
 
       - name: 修 LOS 树 UAPI 头(msm-cirrus-playback.h 用了 uint32_t, header check 会失败)
         run: |
@@ -355,8 +373,10 @@ jobs:
         run: |
           set -uo pipefail
           cd kernel
+          MV=""
+          if [ -s "$GITHUB_WORKSPACE/cld_makevars.txt" ]; then MV=$(tr '\n' ' ' < "$GITHUB_WORKSPACE/cld_makevars.txt"); echo "带 $(wc -l < "$GITHUB_WORKSPACE/cld_makevars.txt") 个 CLD make 变量"; fi
           make -k -j"${{ github.event.inputs.jobs }}" O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC=clang LD=ld.lld KCFLAGS="${{ github.event.inputs.kcflags }}" KBUILD_MODPOST_WARN=1 \
+            CC=clang LD=ld.lld KCFLAGS="${{ github.event.inputs.kcflags }}" KBUILD_MODPOST_WARN=1 $MV \
             modules > "$GITHUB_WORKSPACE/modules.log" 2>&1
           rc=$?
           echo "modules rc=$rc errors=$(grep -c 'error:' "$GITHUB_WORKSPACE/modules.log" || true)"
