@@ -272,6 +272,9 @@ jobs:
           echo 'CONFIG_QCA_CLD_WLAN=m' >> "$K/out/.config"
           if [ "${{ github.event.inputs.cld_features }}" = "1" ]; then
             python3 "$GITHUB_WORKSPACE/patches/cld-features.py" "$K" "$GITHUB_WORKSPACE"
+            # 去掉会与 wlan_cm_roam_api.h 自身守卫冲突的 roam offload(LFR3)开关
+            sed -i '/^CONFIG_QCACLD_WLAN_LFR3=/d' "$GITHUB_WORKSPACE/.config.fragment"
+            echo '# CONFIG_QCACLD_WLAN_LFR3 is not set' >> "$GITHUB_WORKSPACE/.config.fragment"
             cat "$GITHUB_WORKSPACE/.config.fragment" >> "$K/out/.config"
           fi
           ( cd "$K" && make -s O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang olddefconfig )
