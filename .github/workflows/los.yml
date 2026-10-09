@@ -166,6 +166,18 @@ jobs:
           ls arch/arm64/configs/vendor/ 2>/dev/null | head -20 || true
           ls arch/arm64/configs/ 2>/dev/null | head -20 || true
 
+      # ⚠️ 必须放在【所有 config 步骤之前】: 否则恢复出来的 out/.config 会把刚写进去的
+      #    CONFIG_EXTRA_FIRMWARE / container-opts / allbuiltin / force_m 等全部覆盖掉
+      #    (2026-10-10 实测: 固件内建因此没生效, Image 与旧版一模一样)
+      - name: 缓存内核构建产物(加速迭代)
+        uses: actions/cache@v4
+        with:
+          path: kernel/out
+          key: kout-${{ github.event.inputs.config }}-${{ github.event.inputs.cld_ref }}-${{ github.event.inputs.hwid_deexport }}-${{ github.sha }}
+          restore-keys: |
+            kout-${{ github.event.inputs.config }}-${{ github.event.inputs.cld_ref }}-${{ github.event.inputs.hwid_deexport }}-
+            kout-${{ github.event.inputs.config }}-${{ github.event.inputs.cld_ref }}-
+
       - name: 配置（原厂 config + 容器项 + 模块兼容）
         run: |
           set -euo pipefail
@@ -417,15 +429,6 @@ jobs:
             echo 'void __weak moddbg_dump(void) { }'
           } >> kernel/drivers/soc/qcom/logdump.c
           tail -4 kernel/drivers/soc/qcom/logdump.c
-
-      - name: 缓存内核构建产物(加速迭代)
-        uses: actions/cache@v4
-        with:
-          path: kernel/out
-          key: kout-${{ github.event.inputs.config }}-${{ github.event.inputs.cld_ref }}-${{ github.event.inputs.hwid_deexport }}-${{ github.sha }}
-          restore-keys: |
-            kout-${{ github.event.inputs.config }}-${{ github.event.inputs.cld_ref }}-${{ github.event.inputs.hwid_deexport }}-
-            kout-${{ github.event.inputs.config }}-${{ github.event.inputs.cld_ref }}-
 
       - name: 编译 Image
         run: |
