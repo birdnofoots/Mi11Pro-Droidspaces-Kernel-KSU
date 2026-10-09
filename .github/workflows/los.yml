@@ -70,6 +70,10 @@ on:
         description: '1=在 qcacld probe/startup 链插 MARSDBG printk 标记(定位 host driver probe 返回 -1 的步骤)'
         required: false
         default: '0'
+      firmware_embed:
+        description: '1=把 firmware/ 里的固件编进内核(EXTRA_FIRMWARE) ⇒ 内建驱动不再等 60s 用户态固件回退(实测能把开机从 4 分钟压到 ~40s)'
+        required: false
+        default: '0'
       hwid_deexport:
         description: '1=去掉内建 hwid 的 EXPORT_SYMBOL, 让原厂 hwid.ko 能装(cnss2 的依赖)'
         required: false
@@ -316,6 +320,21 @@ jobs:
           python3 "$GITHUB_WORKSPACE/patches/wlan-debug.py" "$PWD/kernel"
           grep -c MARSDBG "$PWD/kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_driver_ops.c" || true
           grep -c MARSDBG "$PWD/kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c" || true
+
+      - name: 固件内建 EXTRA_FIRMWARE(消掉 60s 固件回退等待, 大幅加快开机)
+        if: github.event.inputs.firmware_embed == '1'
+        run: |
+          set -e
+          FW="a660_gmu.bin a660_sqe.fw a660_zap.b00 a660_zap.b01 a660_zap.b02 a660_zap.mdt st_fts_k2.ftb st_fts_k2_htp.ftb stm_fts_production_limits.csv aw8697_haptic.bin ipa_fws.mdt ipa_fws.b00 ipa_fws.b01 ipa_fws.b02 ipa_fws.b03 ipa_fws.b04"
+          mkdir -p kernel/firmware
+          cp -f firmware/* kernel/firmware/
+          echo "--- 待内建固件 ---"; ls -l kernel/firmware | head -20
+          cd kernel
+          for f in $FW; do [ -s "firmware/$f" ] || { echo "::error::缺固件 $f"; exit 1; }; done
+          ./scripts/config --file out/.config --set-str EXTRA_FIRMWARE "$FW"
+          ./scripts/config --file out/.config --set-str EXTRA_FIRMWARE_DIR "firmware"
+          make -s O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang olddefconfig
+          grep -E '^CONFIG_EXTRA_FIRMWARE' out/.config
           # 关键: 删掉缓存里那些 .o / wlan.ko, 否则 make 认为没变(或编译失败时)会把旧 ko 打包进去
           rm -f kernel/out/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_driver_ops.o \
                 kernel/out/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.o \
