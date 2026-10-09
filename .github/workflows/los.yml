@@ -70,6 +70,10 @@ on:
         description: '1=在 qcacld probe/startup 链插 MARSDBG printk 标记(定位 host driver probe 返回 -1 的步骤)'
         required: false
         default: '0'
+      mi_syms_audio:
+        description: '1=额外注入音频桩 is_early_cons_enabled(原厂 mbhc_dlkm 必需 ⇒ 有声卡); 二分定位时可关'
+        required: false
+        default: '0'
       firmware_embed:
         description: '1=把 firmware/ 里的固件编进内核(EXTRA_FIRMWARE) ⇒ 内建驱动不再等 60s 用户态固件回退(实测能把开机从 4 分钟压到 ~40s)'
         required: false
@@ -392,6 +396,11 @@ jobs:
             cp "$GITHUB_WORKSPACE/patches/mi_syms_los.c" kernel/drivers/soc/qcom/mi_syms_los.c
             grep -q 'mi_syms_los.o' kernel/drivers/soc/qcom/Makefile || echo 'obj-y += mi_syms_los.o' >> kernel/drivers/soc/qcom/Makefile
             tail -2 kernel/drivers/soc/qcom/Makefile
+          fi
+          if [ "${{ github.event.inputs.mi_syms_audio }}" = "1" ]; then
+            cp "$GITHUB_WORKSPACE/patches/mi_syms_audio.c" kernel/drivers/soc/qcom/mi_syms_audio.c
+            grep -q 'mi_syms_audio.o' kernel/drivers/soc/qcom/Makefile || echo 'obj-y += mi_syms_audio.o' >> kernel/drivers/soc/qcom/Makefile
+            echo "已注入音频桩: $(grep -c is_early_cons_enabled kernel/drivers/soc/qcom/mi_syms_audio.c)"
           fi
 
       - name: 打 WLAN 专用黑名单 — wlan-block(其余模块照原厂放行)
