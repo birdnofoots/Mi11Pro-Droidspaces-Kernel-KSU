@@ -316,6 +316,13 @@ jobs:
           python3 "$GITHUB_WORKSPACE/patches/wlan-debug.py" "$PWD/kernel"
           grep -c MARSDBG "$PWD/kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_driver_ops.c" || true
           grep -c MARSDBG "$PWD/kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c" || true
+          # 关键: 删掉缓存里那些 .o / wlan.ko, 否则 make 认为没变(或编译失败时)会把旧 ko 打包进去
+          rm -f kernel/out/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_driver_ops.o \
+                kernel/out/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.o \
+                kernel/out/drivers/staging/qcacld-3.0/core/pld/src/pld_pcie.o \
+                kernel/out/drivers/staging/qcacld-3.0/wlan.ko
+          echo "已清理旧 wlan 目标文件"
+          echo "MARSDBG in tree: $(grep -rc MARSDBG kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_driver_ops.c)" 
 
       - name: 修 LOS 树 UAPI 头(msm-cirrus-playback.h 用了 uint32_t, header check 会失败)
         run: |
