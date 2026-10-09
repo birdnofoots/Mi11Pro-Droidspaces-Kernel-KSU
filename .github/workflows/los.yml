@@ -349,7 +349,10 @@ jobs:
           for f in $FW; do [ -s "firmware/$f" ] || { echo "::error::缺固件 $f"; exit 1; }; done
           ./scripts/config --file out/.config --set-str EXTRA_FIRMWARE "$FW"
           ./scripts/config --file out/.config --set-str EXTRA_FIRMWARE_DIR "firmware"
-          make -s O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang olddefconfig
+          # 必须和配置步骤用同一套参数(尤其 LD=ld.lld): 少了它 LD_IS_LLVM=n ⇒
+          # olddefconfig 会把 CONFIG_LTO/THINLTO/LTO_CLANG/CFI_CLANG 全丢掉(2026-10-10 实测)
+          make -s O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld olddefconfig
+          grep -E '^CONFIG_(LTO|THINLTO|LTO_CLANG|CFI_CLANG)=' out/.config || true
           grep -E '^CONFIG_EXTRA_FIRMWARE' out/.config
           # 关键: 删掉缓存里那些 .o / wlan.ko, 否则 make 认为没变(或编译失败时)会把旧 ko 打包进去
           rm -f kernel/out/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_driver_ops.o \
