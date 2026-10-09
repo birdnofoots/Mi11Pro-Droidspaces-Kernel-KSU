@@ -412,6 +412,12 @@ jobs:
           if [ -f drivers/staging/qcacld-3.0/wlan.ko ]; then
             echo "★★ wlan.ko 编出来了"
             cp -f drivers/staging/qcacld-3.0/wlan.ko "$GITHUB_WORKSPACE/modout-wlan.ko"
+            # 顺手把它打进 modules.tgz(测试脚本按 wlan.ko 是否存在来决定是否刷机)
+            KR=$(cat include/config/kernel.release 2>/dev/null || echo "5.4.242-qgki-gbb70cde46897+")
+            D="$GITHUB_WORKSPACE/modout/lib/modules/$KR/kernel/drivers/staging/qcacld-3.0"
+            mkdir -p "$D" && cp -f drivers/staging/qcacld-3.0/wlan.ko "$D/"
+            ( cd "$GITHUB_WORKSPACE/modout" && tar czf "$GITHUB_WORKSPACE/modules.tgz" lib/modules )
+            echo "modules.tgz 现在含: $(tar tzf "$GITHUB_WORKSPACE/modules.tgz" | grep -c '\.ko$') 个 ko, wlan.ko=$(tar tzf "$GITHUB_WORKSPACE/modules.tgz" | grep -c 'wlan\.ko')"
           else
             echo "::warning::没有产出 wlan.ko"
           fi
