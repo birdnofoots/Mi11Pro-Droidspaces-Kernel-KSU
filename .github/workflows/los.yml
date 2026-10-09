@@ -256,7 +256,7 @@ jobs:
           echo 'source "drivers/staging/qcacld-3.0/Kconfig"' >> /tmp/k.tmp
           echo "$LAST" >> /tmp/k.tmp
           mv /tmp/k.tmp "$K/drivers/staging/Kconfig"
-          grep -q 'qcacld-3.0/' "$K/drivers/staging/Makefile" || echo 'obj-$(CONFIG_QCA_CLD_WLAN) += qcacld-3.0/' >> "$K/drivers/staging/Makefile"
+          # 注意: 不用 in-tree obj- 方式(那样 qcacld 的 per-file ccflags/-I 不生效) ⇒ 改用外部模块 M= 方式, 见后面的步骤
           echo "=== 强制打开 CONFIG_QCA_CLD_WLAN=m ==="
           sed -i '/^# CONFIG_QCA_CLD_WLAN is not set/d;/^CONFIG_QCA_CLD_WLAN=/d' "$K/out/.config"
           echo 'CONFIG_QCA_CLD_WLAN=m' >> "$K/out/.config"
@@ -387,6 +387,35 @@ jobs:
             find "$GITHUB_WORKSPACE/modout" -name '*.ko' | xargs -r basename -a | grep -E 'cnss|qca_cld|icnss|cfg80211|mac80211' | head -10
           fi
 
+      - name: 自编 WLAN 驱动(外部模块方式 M=qcacld-3.0)
+        if: github.event.inputs.cld_ref != ''
+        run: |
+          set -uo pipefail
+          set +e
+          K="$GITHUB_WORKSPACE/kernel"
+          MV=""
+          [ -s "$GITHUB_WORKSPACE/cld_makevars.txt" ] && MV=$(tr '\n' ' ' < "$GITHUB_WORKSPACE/cld_makevars.txt")
+          cd "$K"
+          echo "=== 外部模块方式编译 qcacld (QTI 官方方式) ==="
+          make -j"${{ github.event.inputs.jobs }}" O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang LD=ld.lld KBUILD_MODPOST_WARN=1 \
+            M=drivers/staging/qcacld-3.0 MODNAME=wlan \
+            WLAN_ROOT="$K/drivers/staging/qcacld-3.0" \
+            CONFIG_QCA_WIFI_ISOC=0 CONFIG_QCA_WIFI_2_0=1 CONFIG_QCA_CLD_WLAN=m $MV \
+            modules > "$GITHUB_WORKSPACE/cld.log" 2>&1
+          rc=$?
+          echo "cld make rc=$rc errors=$(grep -c 'error:' "$GITHUB_WORKSPACE/cld.log" || true)"
+          tail -30 "$GITHUB_WORKSPACE/cld.log"
+          echo "--- 错误(去重前 25) ---"
+          grep -aE 'error:|fatal error' "$GITHUB_WORKSPACE/cld.log" 2>/dev/null | sed 's|.*/kernel/||' | sort -u | head -25 || true
+          find . -name 'wlan.ko' | head -5 || true
+          if [ -f drivers/staging/qcacld-3.0/wlan.ko ]; then
+            echo "★★ wlan.ko 编出来了"
+            cp -f drivers/staging/qcacld-3.0/wlan.ko "$GITHUB_WORKSPACE/modout-wlan.ko"
+          else
+            echo "::warning::没有产出 wlan.ko"
+          fi
+
       - name: 汇总
         if: always()
         run: |
@@ -415,6 +444,8 @@ jobs:
             build-tail.txt
             build.log
             modules.log
+            cld.log
+            modout-wlan.ko
             modules.tgz
           if-no-files-found: warn
           retention-days: 14
