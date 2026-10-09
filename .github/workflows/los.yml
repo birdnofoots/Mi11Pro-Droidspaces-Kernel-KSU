@@ -242,39 +242,31 @@ jobs:
         if: github.event.inputs.cld_ref != ''
         run: |
           set -e
+          K="$GITHUB_WORKSPACE/kernel"
           REF="${{ github.event.inputs.cld_ref }}"
-          cd kernel/drivers/staging
           for R in fw-api qca-wifi-host-cmn qcacld-3.0; do
+            rm -rf "$K/drivers/staging/$R"
             echo "=== clone $R ($REF) ==="
-            rm -rf "$R"
-            git clone -q --depth 1 -b "$REF" "https://git.codelinaro.org/clo/la/platform/vendor/qcom-opensource/wlan/$R" "$R"
-            du -sh "$R" | tail -1
+            git clone -q --depth 1 -b "$REF" "https://git.codelinaro.org/clo/la/platform/vendor/qcom-opensource/wlan/$R" "$K/drivers/staging/$R"
+            du -sh "$K/drivers/staging/$R" | tail -1
           done
-          echo "=== qcacld Kconfig 头部 ==="
-          head -20 qcacld-3.0/Kconfig || true
-          cd ..
-          # 只有 qcacld-3.0 有 Kconfig; fw-api / qca-wifi-host-cmn 是被 Kbuild 用相对路径引用的源码库
-          LAST=$(tail -1 Kconfig)
-          head -n -1 Kconfig > /tmp/k.tmp
+          # 只有 qcacld-3.0 有 Kconfig; fw-api/cmn 是被 Kbuild 相对路径引用的源码库
+          LAST=$(tail -1 "$K/drivers/staging/Kconfig")
+          head -n -1 "$K/drivers/staging/Kconfig" > /tmp/k.tmp
           echo 'source "drivers/staging/qcacld-3.0/Kconfig"' >> /tmp/k.tmp
           echo "$LAST" >> /tmp/k.tmp
-          mv /tmp/k.tmp Kconfig
-          printf '%s\n' 'obj-$(CONFIG_QCA_CLD_WLAN) += qcacld-3.0/' >> Makefile
-          tail -6 Makefile
-          cd ..
+          mv /tmp/k.tmp "$K/drivers/staging/Kconfig"
+          grep -q 'qcacld-3.0/' "$K/drivers/staging/Makefile" || echo 'obj-$(CONFIG_QCA_CLD_WLAN) += qcacld-3.0/' >> "$K/drivers/staging/Makefile"
+          echo "=== 强制打开 CONFIG_QCA_CLD_WLAN=m ==="
+          sed -i '/^# CONFIG_QCA_CLD_WLAN is not set/d;/^CONFIG_QCA_CLD_WLAN=/d' "$K/out/.config"
+          echo 'CONFIG_QCA_CLD_WLAN=m' >> "$K/out/.config"
           if [ "${{ github.event.inputs.cld_features }}" = "1" ]; then
-            echo "=== 应用 qcacld 供应商特性集 ==="
-            python3 "$GITHUB_WORKSPACE/patches/cld-features.py" "$PWD/kernel" "$GITHUB_WORKSPACE"
-            head -5 "$GITHUB_WORKSPACE/.config.fragment"
-            cat "$GITHUB_WORKSPACE/.config.fragment" >> out/.config
-            ( cd kernel && make -s O=out ARCH=arm64 olddefconfig ) || true
-            echo "QCA_CLD_WLAN: $(grep -E '^CONFIG_QCA_CLD_WLAN' out/.config || true)"
-            echo "HIF_PCI(kernel cfg): $(grep -E '^CONFIG_HIF_PCI' out/.config || true)"
-            echo "make 变量条数: $(wc -l < "$GITHUB_WORKSPACE/cld_makevars.txt")"
+            python3 "$GITHUB_WORKSPACE/patches/cld-features.py" "$K" "$GITHUB_WORKSPACE"
+            cat "$GITHUB_WORKSPACE/.config.fragment" >> "$K/out/.config"
           fi
-          cd kernel
-          sed -i 's/^# CONFIG_QCA_CLD_WLAN is not set/CONFIG_QCA_CLD_WLAN=m/' out/.config 2>/dev/null || true
-          grep -E '^CONFIG_QCA_CLD_WLAN' out/.config || echo "(QCA_CLD_WLAN 未设置!)"
+          ( cd "$K" && make -s O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang olddefconfig )
+          grep -q '^CONFIG_QCA_CLD_WLAN=m' "$K/out/.config" || { echo "::error::QCA_CLD_WLAN 没打开"; exit 1; }
+          echo "OK: QCA_CLD_WLAN=m; 特性片段 $(wc -l < "$GITHUB_WORKSPACE/.config.fragment" 2>/dev/null || echo 0) 行; 剩余 =m 数 $(grep -cE '=m$' "$K/out/.config")"
 
       - name: 修 LOS 树 UAPI 头(msm-cirrus-playback.h 用了 uint32_t, header check 会失败)
         run: |
