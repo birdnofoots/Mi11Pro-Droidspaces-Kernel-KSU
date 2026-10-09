@@ -50,6 +50,10 @@ on:
         description: '1=打 wlan-block(只挡 WLAN 链, 其余模块照原厂放行)'
         required: false
         default: '0'
+      los_commit:
+        description: '指定 LOS 内核提交(留空=lineage-20 最新). 例: 6bb176e034 = 5.4.233(与原厂模块同源)'
+        required: false
+        default: ''
       hwid_deexport:
         description: '1=去掉内建 hwid 的 EXPORT_SYMBOL, 让原厂 hwid.ko 能装(cnss2 的依赖)'
         required: false
@@ -129,6 +133,11 @@ jobs:
           git clone --depth 1 -b "${{ github.event.inputs.los_ref }}" \
             https://github.com/LineageOS/android_kernel_xiaomi_sm8350 kernel
           cd kernel
+          if [ -n "${{ github.event.inputs.los_commit }}" ]; then
+            echo "=== 切到指定提交: ${{ github.event.inputs.los_commit }} ==="
+            git fetch --depth 1 origin "${{ github.event.inputs.los_commit }}"
+            git checkout -q FETCH_HEAD
+          fi
           echo "HEAD: $(git log -1 --format='%h %ci')"
           head -4 Makefile
           ls arch/arm64/configs/vendor/ | head -20
