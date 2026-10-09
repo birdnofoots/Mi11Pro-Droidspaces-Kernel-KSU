@@ -253,14 +253,13 @@ jobs:
           echo "=== qcacld Kconfig 头部 ==="
           head -20 qcacld-3.0/Kconfig || true
           cd ..
+          # 只有 qcacld-3.0 有 Kconfig; fw-api / qca-wifi-host-cmn 是被 Kbuild 用相对路径引用的源码库
           LAST=$(tail -1 Kconfig)
           head -n -1 Kconfig > /tmp/k.tmp
-          echo 'source "drivers/staging/fw-api/Kconfig"' >> /tmp/k.tmp
-          echo 'source "drivers/staging/qca-wifi-host-cmn/Kconfig"' >> /tmp/k.tmp
           echo 'source "drivers/staging/qcacld-3.0/Kconfig"' >> /tmp/k.tmp
           echo "$LAST" >> /tmp/k.tmp
           mv /tmp/k.tmp Kconfig
-          printf '%s\n' 'obj-$(CONFIG_QCA_CLD_WLAN) += qcacld-3.0/' 'obj-$(CONFIG_QCA_WIFI_HOST_CMN) += qca-wifi-host-cmn/' 'obj-$(CONFIG_WLAN_FW_API) += fw-api/' >> Makefile
+          printf '%s\n' 'obj-$(CONFIG_QCA_CLD_WLAN) += qcacld-3.0/' >> Makefile
           tail -6 Makefile
           cd ..
           if [ "${{ github.event.inputs.cld_features }}" = "1" ]; then
