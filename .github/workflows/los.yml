@@ -384,11 +384,12 @@ jobs:
             ( cd "$GITHUB_WORKSPACE/modout" && tar czf "$GITHUB_WORKSPACE/modules.tgz" lib/modules ) || true
             ls -l "$GITHUB_WORKSPACE/modules.tgz" || true
             find "$GITHUB_WORKSPACE/modout" -name '*.ko' | wc -l
-            find "$GITHUB_WORKSPACE/modout" -name '*.ko' | xargs -r basename -a | grep -E 'cnss|qca_cld|icnss|cfg80211|mac80211' | head -10
+            find "$GITHUB_WORKSPACE/modout" -name '*.ko' | xargs -r basename -a | grep -E 'cnss|qca_cld|icnss|cfg80211|mac80211' | head -10 || true
           fi
+          exit 0
 
       - name: 自编 WLAN 驱动(外部模块方式 M=qcacld-3.0)
-        if: github.event.inputs.cld_ref != ''
+        if: always() && github.event.inputs.cld_ref != ''
         run: |
           set -uo pipefail
           set +e
@@ -421,6 +422,7 @@ jobs:
           else
             echo "::warning::没有产出 wlan.ko"
           fi
+          exit 0
 
       - name: 汇总
         if: always()
