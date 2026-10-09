@@ -271,7 +271,10 @@ jobs:
           sed -i '/^# CONFIG_QCA_CLD_WLAN is not set/d;/^CONFIG_QCA_CLD_WLAN=/d' "$K/out/.config"
           echo 'CONFIG_QCA_CLD_WLAN=m' >> "$K/out/.config"
           if [ "${{ github.event.inputs.cld_features }}" = "1" ]; then
-            python3 "$GITHUB_WORKSPACE/patches/cld-features.py" "$K" "$GITHUB_WORKSPACE"
+            # 第 3 个参数 = 内核真实 .config: 让 configs/*.conf 里的 ifeq(CONFIG_ARCH_LAHAINA/CNSS2 …)
+            # 能按真实取值求值。老版本忽略条件把 HIF_IPCI/HIF_USB 也打开 ⇒ regtable_pcie.h 与
+            # regtable_ipcie.h 在同一 TU 里互相重定义(20 errors 卡在这)。
+            python3 "$GITHUB_WORKSPACE/patches/cld-features.py" "$K" "$GITHUB_WORKSPACE" "$K/out/.config"
             # 两个必须关掉的开关:
             #  说明: LFR3(ROAM_OFFLOAD) 保持供应商默认 y ⇒ 头文件的声明块与真实实现配对; 关掉它反而会命中 #ifndef 回退块造成冲突
             #  FEATURE_SKB_PRE_ALLOC → 会启用新 cnss_prealloc API(wcnss_skb_prealloc_get/put), 原厂/本内核都没有 ⇒ 必须关
@@ -431,8 +434,9 @@ jobs:
           echo "=== 外部模块方式编译 qcacld (QTI 官方方式) ===" 
           FWINC="-I$K/drivers/staging/fw-api/hw/qca6490/v1 -I$K/drivers/staging/fw-api/hw/qca6490 -I$K/drivers/staging/fw-api/hw/qca6290/v2 -I$K/drivers/staging/fw-api/fw"
           echo "FWINC=$FWINC"
-          CLDKCFLAGS="$FWINC -DWLAN_FEATURE_ROAM_OFFLOAD -Wno-error -Wno-missing-prototypes -Wno-implicit-function-declaration -Wno-int-conversion -Wno-unused-function -Wno-unused-variable -Wno-format -Wno-pointer-sign -Wno-incompatible-pointer-types -Wno-constant-conversion -Wno-sometimes-uninitialized -Wno-address-of-packed-member -Wno-unused-const-variable -Wno-misleading-indentation -Wno-tautological-compare -Wno-shift-op-parentheses -Wno-parentheses-equality -Wno-bitfield-constant-conversion -Wno-enum-conversion -Wno-unknown-warning-option"
-          make -j"${{ github.event.inputs.jobs }}" O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+          CLDKCFLAGS="$FWINC -DWLAN_FEATURE_ROAM_OFFLOAD -ferror-limit=0 -Wno-error -Wno-missing-prototypes -Wno-implicit-function-declaration -Wno-int-conversion -Wno-unused-function -Wno-unused-variable -Wno-format -Wno-pointer-sign -Wno-incompatible-pointer-types -Wno-constant-conversion -Wno-sometimes-uninitialized -Wno-address-of-packed-member -Wno-unused-const-variable -Wno-misleading-indentation -Wno-tautological-compare -Wno-shift-op-parentheses -Wno-parentheses-equality -Wno-bitfield-constant-conversion -Wno-enum-conversion -Wno-unknown-warning-option"
+          # -k + -ferror-limit=0: 一次跑完所有 TU, 把整棵树的错误一次列全(否则 clang 默认 20 条就停)
+          make -k -j"${{ github.event.inputs.jobs }}" O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             CC=clang LD=ld.lld KBUILD_MODPOST_WARN=1 KCFLAGS="$CLDKCFLAGS" \
             M=drivers/staging/qcacld-3.0 MODNAME=wlan \
             WLAN_ROOT="$K/drivers/staging/qcacld-3.0" \
@@ -441,8 +445,12 @@ jobs:
           rc=$?
           echo "cld make rc=$rc errors=$(grep -c 'error:' "$GITHUB_WORKSPACE/cld.log" || true)"
           tail -30 "$GITHUB_WORKSPACE/cld.log"
-          echo "--- 错误(去重前 25) ---"
-          grep -aE 'error:|fatal error' "$GITHUB_WORKSPACE/cld.log" 2>/dev/null | sed 's|.*/kernel/||' | sort -u | head -25 || true
+          echo "--- 错误分类统计(按消息去重, 最多 60 类) ---"
+          grep -aE 'error:' "$GITHUB_WORKSPACE/cld.log" 2>/dev/null | sed -E 's/^[^ ]*: //' | sort | uniq -c | sort -rn | head -60 || true
+          echo "--- 出错文件 TOP20 ---"
+          grep -aE 'error:' "$GITHUB_WORKSPACE/cld.log" 2>/dev/null | sed -E 's/:[0-9]+:[0-9]+: error.*//' | sort | uniq -c | sort -rn | head -20 || true
+          echo "--- 错误原文(去重, 最多 60 条) ---"
+          grep -aE 'error:' "$GITHUB_WORKSPACE/cld.log" 2>/dev/null | sed 's|.*/kernel/||' | sort -u | head -60 || true
           find . -name 'wlan.ko' | head -5 || true
           if [ -f drivers/staging/qcacld-3.0/wlan.ko ]; then
             echo "★★ wlan.ko 编出来了"
