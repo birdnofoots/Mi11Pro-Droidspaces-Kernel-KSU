@@ -17,10 +17,24 @@ import re
 import sys
 
 root = sys.argv[1] if len(sys.argv) > 1 else "."
-path = os.path.join(root, "drivers/misc/hwid.c")
-if not os.path.exists(path):
-    print("hwid-deexport: 找不到 %s" % path)
-    sys.exit(1)
+# 老树(5.4.233)可能压根没有内建 hwid ⇒ 天然不占名字/不导出符号, 正是我们要的效果 ⇒ 跳过
+cands = [os.path.join(root, "drivers/misc/hwid.c")]
+for dirpath, _dirs, files in os.walk(root):
+    for fn in files:
+        if fn == "hwid.c" and "misc" in dirpath:
+            cands.append(os.path.join(dirpath, fn))
+path = None
+for c in cands:
+    if os.path.exists(c):
+        try:
+            if "get_hw_version_platform" in open(c, errors="ignore").read():
+                path = c
+                break
+        except OSError:
+            pass
+if path is None:
+    print("hwid-deexport: 该树没有内建 hwid(天然满足: 原厂 hwid.ko 可独占名字与符号) ⇒ 跳过")
+    sys.exit(0)
 
 s = open(path, errors="ignore").read()
 if "mars-hwid-deexport" in s:
