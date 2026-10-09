@@ -38,7 +38,14 @@ PROFILE = [
     ("CONFIG_WLAN_TX_FLOW_CONTROL_V2", "y"),
     ("CONFIG_WLAN_TX_FLOW_CONTROL_LEGACY", "n"),
     ("CONFIG_FEATURE_SKB_PRE_ALLOC", "n"),
-    ("CONFIG_IPA_OFFLOAD", "n"),
+    # 注意: 这里**不要**动 CONFIG_IPA_OFFLOAD。
+    # los43 实测: 显式 `CONFIG_IPA_OFFLOAD := n` 会把 default_defconfig 里
+    #   ifeq ($(CONFIG_IPA_OFFLOAD), y) → CONFIG_ENABLE_SMMU_S1_TRANSLATION := y
+    # 那条删掉, 而 cmn 的 qdf_ipa.h 只在 `#ifdef ENABLE_SMMU_S1_TRANSLATION` 里声明
+    # qdf_get_ipa_smmu_enabled(), cds_api.c 却无条件调用它
+    #   ⇒ ../core/cds/src/cds_api.c:2873: error: implicit declaration of function
+    #     'qdf_get_ipa_smmu_enabled'  (modules rc=2, wlan.ko 变成缓存里的旧文件!)
+    # 树内编译本来就按内核 .config 自然取值, 不需要我们钉。
 ]
 
 d = os.path.join(root, "drivers/staging/qcacld-3.0/configs")
