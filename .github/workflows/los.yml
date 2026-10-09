@@ -50,6 +50,10 @@ on:
         description: '1=打 wlan-block(只挡 WLAN 链, 其余模块照原厂放行)'
         required: false
         default: '0'
+      hwid_deexport:
+        description: '1=去掉内建 hwid 的 EXPORT_SYMBOL, 让原厂 hwid.ko 能装(cnss2 的依赖)'
+        required: false
+        default: '0'
       wlan_allow:
         description: '空格分隔的例外名单(定向门禁): 只放行这些 WLAN 模块, 其余 WLAN 链仍挡. 例: qca_cld3_wlan qca_cld3_qca6390'
         required: false
@@ -262,6 +266,13 @@ jobs:
             grep -c 'mars_wlan_in_allow_names' kernel/kernel/module.c
             echo "定向放行名单: ${{ github.event.inputs.wlan_allow }}"
           fi
+
+      - name: hwid 去导出 — 让原厂 hwid.ko 能装(原厂 cnss2 依赖它)
+        if: github.event.inputs.hwid_deexport == '1'
+        run: |
+          set -e
+          python3 "$GITHUB_WORKSPACE/patches/hwid-deexport.py" "$PWD/kernel"
+          echo "剩余 EXPORT_SYMBOL: $(grep -c '^EXPORT_SYMBOL' kernel/drivers/misc/hwid.c || true)"
 
       - name: 接入 logdump + moddbg(内核日志连续落盘 + 模块表诊断)
         if: github.event.inputs.logdump == '1'
