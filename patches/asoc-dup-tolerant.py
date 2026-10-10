@@ -99,6 +99,48 @@ def patch_trace(path):
     return 'patched(trace-only x%d)' % n
 
 
+def patch_alsa_log(root):
+    """ALSA 核心打点(纯日志): 定位 snd_card_register() 的 -EBUSY 到底出自哪个 minor 槽位。
+    依据 los68 实测: ASoC 侧的 MARS-TRACE 指向 soc-core.c 的 `ret = snd_card_register(...)` 返回 -16。
+    """
+    out = []
+    # 1) sound/core/sound.c: 两处 `return -EBUSY;`(minor 被占)
+    p1 = os.path.join(root, 'sound/core/sound.c')
+    if os.path.exists(p1):
+        s1 = open(p1, encoding='utf-8', errors='surrogateescape').read()
+        if 'MARS-TRACE2' in s1:
+            out.append('skip(sound.c)')
+        else:
+            n1 = s1.count('return -EBUSY;')
+            s1 = s1.replace('return -EBUSY;',
+                            '{ pr_err("MARS-TRACE2 sound.c:%d minor=%d busy\\n", __LINE__, minor); return -EBUSY; }')
+            open(p1, 'w', encoding='utf-8', errors='surrogateescape').write(s1)
+            out.append('patched(sound.c x%d)' % n1)
+    else:
+        out.append('sound.c MISSING')
+    # 2) sound/core/init.c: snd_device_register_all 失败处
+    p2 = os.path.join(root, 'sound/core/init.c')
+    if os.path.exists(p2):
+        s2 = open(p2, encoding='utf-8', errors='surrogateescape').read()
+        if 'MARS-TRACE2' in s2:
+            out.append('skip(init.c)')
+        else:
+            old = ('\tif ((err = snd_device_register_all(card)) < 0)\n'
+                   '\t\treturn err;')
+            new2 = ('\tif ((err = snd_device_register_all(card)) < 0) {\n'
+                    '\t\tpr_err("MARS-TRACE2 init.c:%d device_register_all err=%d cardnum=%d id=%s\\n", __LINE__, err, card->number, card->id);\n'
+                    '\t\treturn err;\n'
+                    '\t}')
+            if old in s2:
+                open(p2, 'w', encoding='utf-8', errors='surrogateescape').write(s2.replace(old, new2, 1))
+                out.append('patched(init.c)')
+            else:
+                out.append('init.c PATTERN-MISS')
+    else:
+        out.append('init.c MISSING')
+    return ','.join(out)
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     flags = [a for a in sys.argv[1:] if a.startswith('--')]
@@ -116,6 +158,7 @@ def main():
     if do_trace:
         p = os.path.join(root, 'sound/soc/soc-core.c')
         results.append('trace -> %s' % patch_trace(p))
+        results.append('alsa-trace -> %s' % patch_alsa_log(root))
     print('\n'.join(results))
     return 1 if any('ERROR' in r or 'MISSING' in r for r in results) else 0
 
