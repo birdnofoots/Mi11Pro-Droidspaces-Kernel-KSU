@@ -170,9 +170,9 @@ def patch_alsa_log(root):
             old4 = ('\t\tif (pcm->card == newpcm->card && pcm->device == newpcm->device)\n'
                     '\t\t\treturn -EBUSY;')
             new4 = ('\t\tif (pcm->card == newpcm->card && pcm->device == newpcm->device) {\n'
-                    '\t\t\tpr_err("MARS-TRACE4 pcm_add dup: new(card=%d dev=%d name=%s) existing(card=%d dev=%d name=%s id=%s)\\n",\n'
-                    '\t\t\t       newpcm->card->number, newpcm->device, newpcm->name,\n'
-                    '\t\t\t       pcm->card->number, pcm->device, pcm->name, pcm->card->id);\n'
+                    '\t\t\tpr_err("MARS-TRACE4 pcm_add dup: new=%px(card=%d dev=%d id=%s) ex=%px(card=%d dev=%d id=%s)\\n",\n'
+                    '\t\t\t       newpcm, newpcm->card->number, newpcm->device, newpcm->id,\n'
+                    '\t\t\t       pcm, pcm->card->number, pcm->device, pcm->id);\n'
                     '\t\t\treturn -EBUSY;\n'
                     '\t\t}')
             n4 = 1 if old4 in s4 else 0
@@ -199,6 +199,49 @@ def patch_alsa_log(root):
     return ','.join(out)
 
 
+def patch_trace2(root):
+    """第二轮打点(纯日志): 回答"为什么两个 PCM 都拿到 device 0"。
+       a) soc_link_init 的 use_dai_pcm_id 分支: 打印是哪个组件触发的 + id/rtd->num;
+       b) 建 PCM 前: 打印 link/stream/rtd->num/最终 num/id;
+       c) soc_new_pcm 入口: 打印 new_name(即 pcm->id)。
+    """
+    out = []
+    p = os.path.join(root, 'sound/soc/soc-core.c')
+    if not os.path.exists(p):
+        return 'soc-core.c MISSING'
+    s = open(p, encoding='utf-8', errors='surrogateescape').read()
+    if 'MARS-USEID' in s:
+        return 'skip(trace2)'
+
+    # a) use_dai_pcm_id 分支内打点
+    old_a = ('\t\tif (!component->driver->use_dai_pcm_id)\n'
+             '\t\t\tcontinue;\n')
+    new_a = (old_a +
+             '\t\tdev_info(card->dev, "MARS-USEID link=%s comp=%s name=\\\"%s\\\" base=%d\\n",\n'
+             '\t\t\t rtd->dai_link->name, component->name,\n'
+             '\t\t\t component->driver->name ? component->driver->name : "?",\n'
+             '\t\t\t component->driver->be_pcm_base);\n')
+    n_a = 1 if old_a in s else 0
+    if n_a:
+        s = s.replace(old_a, new_a, 1)
+
+    # b) 建 PCM 前打点(放在 compress 分支之后、soc_new_pcm 之前)
+    old_b = ('\t/* create the pcm */\n'
+             '\tret = soc_new_pcm(rtd, num);\n')
+    new_b = ('\tdev_info(card->dev, "MARS-NUM link=%s stream=%s rtd_num=%d num=%d id=%d no_pcm=%d\\n",\n'
+             '\t\t dai_link->name, dai_link->stream_name, rtd->num, num, dai_link->id, dai_link->no_pcm);\n'
+             '\t/* create the pcm */\n'
+             '\tret = soc_new_pcm(rtd, num);\n')
+    n_b = 1 if old_b in s else 0
+    if n_b:
+        s = s.replace(old_b, new_b, 1)
+
+    if n_a or n_b:
+        open(p, 'w', encoding='utf-8', errors='surrogateescape').write(s)
+    out.append('trace2(a=%d b=%d)' % (n_a, n_b))
+    return ','.join(out)
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     flags = [a for a in sys.argv[1:] if a.startswith('--')]
@@ -217,6 +260,7 @@ def main():
         p = os.path.join(root, 'sound/soc/soc-core.c')
         results.append('trace -> %s' % patch_trace(p))
         results.append('alsa-trace -> %s' % patch_alsa_log(root))
+        results.append('trace2 -> %s' % patch_trace2(root))
     print('\n'.join(results))
     return 1 if any('ERROR' in r or 'MISSING' in r for r in results) else 0
 
