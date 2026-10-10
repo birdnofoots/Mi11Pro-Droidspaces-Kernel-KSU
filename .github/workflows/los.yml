@@ -467,6 +467,18 @@ jobs:
           [ -s out/arch/arm64/boot/Image ] || { echo "::error::没有 Image"; exit 1; }
           [ "$rc" = 0 ] || echo "::warning::make rc=$rc 但 Image 已生成, 继续(不阻断模块步骤)"
 
+      - name: 构建错误闸门(make -k 会忽略编译错误 ⇒ 防止用旧 .o 拼出假 Image)
+        run: |
+          set -e
+          N=$(grep -acE '(^|[^A-Za-z])error:' "$GITHUB_WORKSPACE/build.log" || true)
+          echo "build.log 中 error: 行数 = $N"
+          if [ "$N" -gt 0 ]; then
+            grep -aE '(^|[^A-Za-z])error:' "$GITHUB_WORKSPACE/build.log" | head -8
+            echo "::error::编译日志里有 error: ⇒ 产物可能是缓存旧对象拼的, 拒绝继续(2026-10-11 教训: soc-dapm.c 的 continue 编译失败被 make -k 吞掉, 产出的 Image 其实没有补丁)"
+            exit 1
+          fi
+          echo "build.log 无 error: ✓"
+
       - name: 编译内核模块并打包(可选)
         if: github.event.inputs.modules == '1'
         run: |
