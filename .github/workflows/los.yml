@@ -453,6 +453,15 @@ jobs:
           python3 "$GITHUB_WORKSPACE/patches/asoc-dup-tolerant.py" "$PWD/kernel" --trace
           grep -c 'MARS-TRACE' "$PWD/kernel/sound/soc/soc-core.c" "$PWD/kernel/sound/soc/soc-dapm.c" "$PWD/kernel/sound/core/pcm.c" || true
 
+      - name: "声卡 PCM 撞号修复 — MARS-PCM-RENUM(仅 extra_config 含 RENUM 时打)"
+        # ⚠️ 单独用它: 声卡能注册但系统 ~65s 后崩/循环(2026-10-11 los76/77 实测) ⇒ 默认不打,
+        #    只在 extra_config 里带 RENUM 标记时用于"抓崩溃现场"(配 logdump=1)。
+        if: contains(github.event.inputs.extra_config, 'RENUM')
+        run: |
+          set -e
+          python3 "$GITHUB_WORKSPACE/patches/asoc-pcm-renum.py" "$PWD/kernel"
+          grep -c 'MARS-PCM-RENUM' "$PWD/kernel/sound/soc/soc-core.c"
+
       - name: 编译 Image
         run: |
           set -uo pipefail
