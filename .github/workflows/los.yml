@@ -78,10 +78,6 @@ on:
         description: '1=把 firmware/ 里的固件编进内核(EXTRA_FIRMWARE) ⇒ 内建驱动不再等 60s 用户态固件回退(实测能把开机从 4 分钟压到 ~40s)'
         required: false
         default: '0'
-      debugfs:
-        description: '1=打开 CONFIG_DEBUG_FS(原厂 camera.ko 缺 8 个 + swr_ctrl_dlkm/wcd938x_slave_dlkm 缺 2~3 个 debugfs 导出符号 ⇒ 模块装不上; LOS 原生 vendor/debugfs.config 也是开的)'
-        required: false
-        default: '0'
       hwid_deexport:
         description: '1=去掉内建 hwid 的 EXPORT_SYMBOL, 让原厂 hwid.ko 能装(cnss2 的依赖)'
         required: false
@@ -340,19 +336,6 @@ jobs:
           python3 "$GITHUB_WORKSPACE/patches/wlan-debug.py" "$PWD/kernel"
           grep -c MARSDBG "$PWD/kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_driver_ops.c" || true
           grep -c MARSDBG "$PWD/kernel/drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.c" || true
-
-      - name: 打开 CONFIG_DEBUG_FS(vendor camera.ko / swr_ctrl_dlkm.ko / wcd938x_slave_dlkm.ko 需要 debugfs 导出符号)
-        if: github.event.inputs.debugfs == '1'
-        run: |
-          set -e
-          cd kernel
-          ./scripts/config --file out/.config -e DEBUG_FS
-          # 必须与配置步骤同一套参数(尤其 LD=ld.lld), 否则 olddefconfig 会丢掉 LTO/CFI
-          make -s O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld olddefconfig
-          echo "--- DEBUG_FS 现状 ---"
-          grep -E '^CONFIG_DEBUG_FS' out/.config || { echo "::error::DEBUG_FS 未生效"; exit 1; }
-          echo "--- LTO/CFI 复核 ---"
-          grep -E '^CONFIG_(LTO|THINLTO|LTO_CLANG|CFI_CLANG)=' out/.config || true
 
       - name: 固件内建 EXTRA_FIRMWARE(消掉 60s 固件回退等待, 大幅加快开机)
         if: github.event.inputs.firmware_embed == '1'
