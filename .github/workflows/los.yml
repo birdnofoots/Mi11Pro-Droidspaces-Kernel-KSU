@@ -453,6 +453,14 @@ jobs:
           python3 "$GITHUB_WORKSPACE/patches/asoc-dup-tolerant.py" "$PWD/kernel" --trace
           grep -c 'MARS-TRACE' "$PWD/kernel/sound/soc/soc-core.c" "$PWD/kernel/sound/soc/soc-dapm.c" "$PWD/kernel/sound/core/pcm.c" || true
 
+      - name: "声卡 PCM 撞号修复 — MARS-PCM-RENUM: 重复 .id 的 link 换空闲 device 号"
+        # machine_dlkm.ko 的 link 表里 MultiMedia10 与 Compress3 都是
+        # MSM_FRONTEND_DAI_MULTIMEDIA10 ⇒ 同 card 同 device 两个 PCM ⇒ snd_card_register -16 ⇒ 无声卡。
+        run: |
+          set -e
+          python3 "$GITHUB_WORKSPACE/patches/asoc-pcm-renum.py" "$PWD/kernel"
+          grep -c 'MARS-PCM-RENUM' "$PWD/kernel/sound/soc/soc-core.c"
+
       - name: 编译 Image
         run: |
           set -uo pipefail
