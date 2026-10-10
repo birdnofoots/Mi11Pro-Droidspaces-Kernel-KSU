@@ -442,6 +442,12 @@ jobs:
           } >> kernel/drivers/soc/qcom/logdump.c
           tail -4 kernel/drivers/soc/qcom/logdump.c
 
+      - name: ASoC 容忍重名控件(-EBUSY) — 与小米原厂行为对齐(否则声卡注册 -16)
+        run: |
+          set -e
+          python3 "$GITHUB_WORKSPACE/patches/asoc-dup-tolerant.py" "$PWD/kernel"
+          grep -n 'MARS-ASOC-DUP-TOLERANT' "$PWD/kernel/sound/soc/soc-core.c" | head -3
+
       - name: 编译 Image
         run: |
           set -uo pipefail
