@@ -575,8 +575,10 @@ jobs:
           cat meta.txt
           tail -c 400000 build.log > build-tail.txt 2>/dev/null || true
 
+      # ⚠️ 2026-10-11: 产物分两步上传。编译失败时 make -k 会拿旧 .o 拼出"假 Image",
+      # 曾把这种 los72 假镜像刷进手机(白跑一轮) ⇒ Image 只在 success 时上传。
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: success()
         with:
           name: los-kernel-${{ github.run_number }}
           path: |
@@ -584,11 +586,20 @@ jobs:
             kernel/out/Module.symvers
             kernel/out/System.map
             meta.txt
+            modout-wlan.ko
+            modules.tgz
+          if-no-files-found: warn
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: los-logs-${{ github.run_number }}
+          path: |
+            meta.txt
             build-tail.txt
             build.log
             modules.log
             cld.log
-            modout-wlan.ko
-            modules.tgz
           if-no-files-found: warn
           retention-days: 14
