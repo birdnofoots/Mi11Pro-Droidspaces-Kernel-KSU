@@ -160,6 +160,42 @@ def patch_alsa_log(root):
                 out.append('device.c PATTERN-MISS')
     else:
         out.append('device.c MISSING')
+    # 4) sound/core/pcm.c: snd_pcm_add() 的 -EBUSY(打印冲突的既存 PCM 是谁) + snd_pcm_dev_register 里 snd_register_device 失败
+    p4 = os.path.join(root, 'sound/core/pcm.c')
+    if os.path.exists(p4):
+        s4 = open(p4, encoding='utf-8', errors='surrogateescape').read()
+        if 'MARS-TRACE4' in s4:
+            out.append('skip(pcm.c)')
+        else:
+            old4 = ('\t\tif (pcm->card == newpcm->card && pcm->device == newpcm->device)\n'
+                    '\t\t\treturn -EBUSY;')
+            new4 = ('\t\tif (pcm->card == newpcm->card && pcm->device == newpcm->device) {\n'
+                    '\t\t\tpr_err("MARS-TRACE4 pcm_add dup: new(card=%d dev=%d name=%s) existing(card=%d dev=%d name=%s id=%s)\n",\n'
+                    '\t\t\t       newpcm->card->number, newpcm->device, newpcm->name,\n'
+                    '\t\t\t       pcm->card->number, pcm->device, pcm->name, pcm->card->id);\n'
+                    '\t\t\treturn -EBUSY;\n'
+                    '\t\t}')
+            n4 = 1 if old4 in s4 else 0
+            if n4:
+                s4 = s4.replace(old4, new4, 1)
+            # 另外: snd_pcm_dev_register 里 snd_register_device 失败也打点
+            old5 = ('\t\tif (err < 0) {\n'
+                    '\t\t\tlist_del_init(&pcm->list);\n'
+                    '\t\t\tgoto unlock;\n'
+                    '\t\t}')
+            new5 = ('\t\tif (err < 0) {\n'
+                    '\t\t\tpr_err("MARS-TRACE4 pcm_dev_register snd_register_device err=%d devtype=%d dev=%d\n", err, devtype, pcm->device);\n'
+                    '\t\t\tlist_del_init(&pcm->list);\n'
+                    '\t\t\tgoto unlock;\n'
+                    '\t\t}')
+            n5 = 1 if old5 in s4 else 0
+            if n5:
+                s4 = s4.replace(old5, new5, 1)
+            if n4 or n5:
+                open(p4, 'w', encoding='utf-8', errors='surrogateescape').write(s4)
+            out.append('patched(pcm.c add=%d devreg=%d)' % (n4, n5))
+    else:
+        out.append('pcm.c MISSING')
     return ','.join(out)
 
 
