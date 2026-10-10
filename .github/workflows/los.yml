@@ -445,8 +445,10 @@ jobs:
       - name: ASoC 容忍重名控件(-EBUSY) — 与小米原厂行为对齐(否则声卡注册 -16)
         run: |
           set -e
-          python3 "$GITHUB_WORKSPACE/patches/asoc-dup-tolerant.py" "$PWD/kernel"
-          grep -n 'MARS-ASOC-DUP-TOLERANT' "$PWD/kernel/sound/soc/soc-core.c" | head -3
+          ARG=""
+          if [ "${{ github.event.inputs.wlan_debug }}" = "1" ]; then ARG="--trace"; echo "  (wlan_debug=1 ⇒ 追加 MARS-TRACE 打点 + 每步 -EBUSY 容忍)"; fi
+          python3 "$GITHUB_WORKSPACE/patches/asoc-dup-tolerant.py" "$PWD/kernel" $ARG
+          grep -c 'MARS-ASOC-DUP-TOLERANT\|MARS-TRACE' "$PWD/kernel/sound/soc/soc-core.c" "$PWD/kernel/sound/soc/soc-dapm.c" || true
 
       - name: 编译 Image
         run: |
