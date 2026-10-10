@@ -70,10 +70,10 @@ def patch_dapm(path):
 
 
 def patch_trace(path):
-    """把 snd_soc_instantiate_card() 里每个 `goto probe_end;` 换成:
-        if (ret == -EBUSY) { 打点并容忍 } else { 打点并 goto probe_end; }
-    用带花括号的复合语句替换, 在有花括号/无花括号的 if 上下文里都合法(C 的单语句规则)。
-    ⇒ 一次编译同时做到: ①定位(-16 出自哪一步) ②修复(容忍该步的 -EBUSY 让卡片继续注册)。
+    """纯打点(不改控制流): 把每个 `goto probe_end;` 替换成
+        { dev_err(card->dev, "MARS-TRACE line=%d ret=%d\n", __LINE__, ret); goto probe_end; }
+    用**裸复合语句块**包裹 ⇒ 在有花括号/无花括号的 if 上下文里都合法(C 单语句规则),
+    且不改变任何控制流(只多一行日志) ⇒ 不会像 los67 的"跳过式容忍"那样把内核搞挂。
     """
     src = open(path, encoding='utf-8', errors='surrogateescape').read()
     if TMARK in src:
@@ -87,10 +87,8 @@ def patch_trace(path):
 
     def repl(m):
         ind = m.group(1)
-        return (ind + 'if (ret == -EBUSY) {\n'
-                + ind + '\tdev_err(card->dev, "' + TMARK + '-TOLERATE line=%d ret=%d\\n", __LINE__, ret);\n'
-                + ind + '} else {\n'
-                + ind + '\tdev_err(card->dev, "' + TMARK + '-FAIL line=%d ret=%d\\n", __LINE__, ret);\n'
+        return (ind + '{\n'
+                + ind + '\tdev_err(card->dev, "' + TMARK + ' line=%d ret=%d\\n", __LINE__, ret);\n'
                 + ind + '\tgoto probe_end;\n'
                 + ind + '}')
 
@@ -98,7 +96,7 @@ def patch_trace(path):
     if n == 0:
         return 'ERROR(no goto probe_end)'
     open(path, 'w', encoding='utf-8', errors='surrogateescape').write(src[:start] + body2 + src[end:])
-    return 'patched(trace+tolerate x%d)' % n
+    return 'patched(trace-only x%d)' % n
 
 
 def main():
@@ -107,7 +105,12 @@ def main():
     root = args[0] if args else '.'
     do_trace = '--trace' in flags
     results = []
-    for rel, fn in (('sound/soc/soc-core.c', patch_core), ('sound/soc/soc-dapm.c', patch_dapm)):
+    pairs = [('sound/soc/soc-core.c', patch_core)]
+    # 注意: --trace 模式下**不打** dapm 的"跳过式容忍"补丁 —— 2026-10-11 los67 实测它会硬挂内核
+    # (跳过 kcontrol 后 w->kcontrols[kci] 为 NULL, 后续 DAPM 解引用 ⇒ panic)。纯日志模式只需 soc-core。
+    if not do_trace:
+        pairs.append(('sound/soc/soc-dapm.c', patch_dapm))
+    for rel, fn in pairs:
         p = os.path.join(root, rel)
         results.append('%s -> %s' % (rel, fn(p)) if os.path.exists(p) else '%s -> MISSING' % rel)
     if do_trace:
