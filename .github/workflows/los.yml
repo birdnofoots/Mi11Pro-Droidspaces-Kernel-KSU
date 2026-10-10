@@ -442,13 +442,16 @@ jobs:
           } >> kernel/drivers/soc/qcom/logdump.c
           tail -4 kernel/drivers/soc/qcom/logdump.c
 
-      - name: ASoC 容忍重名控件(-EBUSY) — 与小米原厂行为对齐(否则声卡注册 -16)
+      - name: ASoC 诊断打点(--trace, 仅 wlan_debug=1)
+        # 2026-10-11 结论: 非 trace 的"容忍 -EBUSY"控制流补丁会让每次开机进重启循环
+        # (los70 实证: 470s 才 boot_completed, 用户手动进 fastboot 才救回; 而 los61/70/71 的
+        #  /proc/config.gz 完全一致 ⇒ 循环是补丁代码造成, 不是 config)。⇒ 默认一律不打补丁。
+        if: github.event.inputs.wlan_debug == '1'
         run: |
           set -e
-          ARG=""
-          if [ "${{ github.event.inputs.wlan_debug }}" = "1" ]; then ARG="--trace"; echo "  (wlan_debug=1 ⇒ 追加 MARS-TRACE 打点 + 每步 -EBUSY 容忍)"; fi
-          python3 "$GITHUB_WORKSPACE/patches/asoc-dup-tolerant.py" "$PWD/kernel" $ARG
-          grep -c 'MARS-ASOC-DUP-TOLERANT\|MARS-TRACE' "$PWD/kernel/sound/soc/soc-core.c" "$PWD/kernel/sound/soc/soc-dapm.c" || true
+          echo "  (wlan_debug=1 ⇒ 纯 MARS-TRACE 打点, 不改控制流)"
+          python3 "$GITHUB_WORKSPACE/patches/asoc-dup-tolerant.py" "$PWD/kernel" --trace
+          grep -c 'MARS-TRACE' "$PWD/kernel/sound/soc/soc-core.c" "$PWD/kernel/sound/soc/soc-dapm.c" "$PWD/kernel/sound/core/pcm.c" || true
 
       - name: 编译 Image
         run: |
