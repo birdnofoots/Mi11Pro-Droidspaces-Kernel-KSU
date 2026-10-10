@@ -40,6 +40,10 @@ def patch_core(path):
 
 
 def patch_dapm(path):
+    """soc-dapm.c: 给 widget 加 DAPM kcontrol 时容忍重名(-EBUSY)。
+    注意: 该处不是循环(是"只建一个控件"的辅助函数), **不能用 continue**,
+    正确做法是释放控件、ret=0、按成功返回, 让声卡继续注册。
+    """
     src = open(path, encoding='utf-8', errors='surrogateescape').read()
     if MARK in src:
         return 'skip(dapm)'
@@ -49,17 +53,17 @@ def patch_dapm(path):
         r'\t\t\tdev_err\(dapm->dev,\n'
         r'\t\t\t\t"ASoC: failed to add widget %s dapm kcontrol %s: %d\\n",\n'
         r'\t\t\t\tw->name, name, ret\);\n)'
-        r'(\t\t\t)(goto exit_free;)')
+        r'(\t\t\tgoto exit_free;)')
     m = pat.search(src)
     if not m:
         return 'ERROR(pattern not found)'
     ins = ('\t\t\t/* ' + MARK + ': 与小米原厂行为对齐 —— 重名 DAPM 控件(-EBUSY)\n'
-           '\t\t\t * (例 "MultiMedia1 Mixer USB_AUDIO_TX")只警告并跳过, 否则整张声卡 -16 注册失败。\n'
+           '\t\t\t * (例 "MultiMedia1 Mixer USB_AUDIO_TX")容忍: 释放该控件并按成功返回,\n'
+           '\t\t\t * 否则整张声卡会以 -16 注册失败(实测)。此处不在循环里, 不能用 continue。\n'
            '\t\t\t */\n'
            '\t\t\tif (ret == -EBUSY) {\n'
            '\t\t\t\tsnd_ctl_free_one(kcontrol);\n'
            '\t\t\t\tret = 0;\n'
-           '\t\t\t\tcontinue;\n'
            '\t\t\t}\n')
     open(path, 'w', encoding='utf-8', errors='surrogateescape').write(src[:m.start(2)] + ins + src[m.start(2):])
     return 'patched(dapm)'
