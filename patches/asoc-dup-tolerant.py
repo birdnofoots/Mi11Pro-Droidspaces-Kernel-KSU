@@ -170,7 +170,7 @@ def patch_alsa_log(root):
             old4 = ('\t\tif (pcm->card == newpcm->card && pcm->device == newpcm->device)\n'
                     '\t\t\treturn -EBUSY;')
             new4 = ('\t\tif (pcm->card == newpcm->card && pcm->device == newpcm->device) {\n'
-                    '\t\t\tpr_err("MARS-TRACE4 pcm_add dup: new(card=%d dev=%d name=%s) existing(card=%d dev=%d name=%s id=%s)\n",\n'
+                    '\t\t\tpr_err("MARS-TRACE4 pcm_add dup: new(card=%d dev=%d name=%s) existing(card=%d dev=%d name=%s id=%s)\\n",\n'
                     '\t\t\t       newpcm->card->number, newpcm->device, newpcm->name,\n'
                     '\t\t\t       pcm->card->number, pcm->device, pcm->name, pcm->card->id);\n'
                     '\t\t\treturn -EBUSY;\n'
@@ -184,7 +184,7 @@ def patch_alsa_log(root):
                     '\t\t\tgoto unlock;\n'
                     '\t\t}')
             new5 = ('\t\tif (err < 0) {\n'
-                    '\t\t\tpr_err("MARS-TRACE4 pcm_dev_register snd_register_device err=%d devtype=%d dev=%d\n", err, devtype, pcm->device);\n'
+                    '\t\t\tpr_err("MARS-TRACE4 pcm_dev_register snd_register_device err=%d devtype=%d dev=%d\\n", err, devtype, pcm->device);\n'
                     '\t\t\tlist_del_init(&pcm->list);\n'
                     '\t\t\tgoto unlock;\n'
                     '\t\t}')
