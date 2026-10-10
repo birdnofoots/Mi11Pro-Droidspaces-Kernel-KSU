@@ -138,6 +138,28 @@ def patch_alsa_log(root):
                 out.append('init.c PATTERN-MISS')
     else:
         out.append('init.c MISSING')
+    # 3) sound/core/device.c: __snd_device_register 的 dev_register 失败(打印设备类型)
+    p3 = os.path.join(root, 'sound/core/device.c')
+    if os.path.exists(p3):
+        s3 = open(p3, encoding='utf-8', errors='surrogateescape').read()
+        if 'MARS-TRACE3' in s3:
+            out.append('skip(device.c)')
+        else:
+            old3 = ('\t\t\tint err = dev->ops->dev_register(dev);\n'
+                    '\t\t\tif (err < 0)\n'
+                    '\t\t\t\treturn err;')
+            new3 = ('\t\t\tint err = dev->ops->dev_register(dev);\n'
+                    '\t\t\tif (err < 0) {\n'
+                    '\t\t\t\tpr_err("MARS-TRACE3 device.c:%d dev_register type=%d err=%d\\n", __LINE__, dev->type, err);\n'
+                    '\t\t\t\treturn err;\n'
+                    '\t\t\t}')
+            if old3 in s3:
+                open(p3, 'w', encoding='utf-8', errors='surrogateescape').write(s3.replace(old3, new3, 1))
+                out.append('patched(device.c)')
+            else:
+                out.append('device.c PATTERN-MISS')
+    else:
+        out.append('device.c MISSING')
     return ','.join(out)
 
 
