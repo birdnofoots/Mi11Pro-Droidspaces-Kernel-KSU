@@ -58,16 +58,26 @@ def _patch_codecs_kbuild(path):
     #   ifneq (,$(filter $(TARGET_PRODUCT), venus star mars haydn odin vili))
     #       obj-y += cs35l41/
     #   endif
+    # 原文（两种变体都可能）:
+    #   ifneq (,$(filter $(TARGET_PRODUCT), venus star haydn))
+    #       obj-y += cs35l41/
+    #   endif
+    # 或:
+    #   ifneq (,$(filter $(TARGET_PRODUCT), venus star mars haydn odin vili))
+    #       obj-y += cs35l41/
+    #   endif
     pat = re.compile(
-        r'ifneq\s*\(\s*,\s*\$\(filter \$\(TARGET_PRODUCT\),\s*'
-        r'venus star mars haydn odin vili\)\s*\)\s*\n'
-        r'([ \t]*obj-y[ \t]*\+=[ \t]*cs35l41/[ \t]*\n)'
-        r'[ \t]*endif',
+        r'ifneq\s*\(\s*,\s*\$\(filter\s+\$\(TARGET_PRODUCT\),[^)]*\)\s*\)\s*\n'
+        r'([ \t]*obj-y\s*\+=\s*cs35l41/\s*\n)'
+        r'\s*endif',
         re.M,
     )
     m = pat.search(src)
     if not m:
-        raise RuntimeError('codecs/Kbuild: 未找到 TARGET_PRODUCT 门，无法打补丁')
+        # 也许它已经无条件了（被之前的补丁打过）
+        if re.search(r'^\s*obj-\w\s*\+=\s*cs35l41/', src, re.M):
+            return 'codecs/Kbuild: cs35l41 已无条件包含'
+        raise RuntimeError('codecs/Kbuild: 未找到 cs35l41 的 TARGET_PRODUCT 门，无法打补丁')
     repl = (
         '/* %s: 无条件编入 cs35l41(mars 功放, 同源替换原厂 5.4.233 模块) */\n'
         'obj-y\t+= cs35l41/' % MARK
@@ -121,34 +131,53 @@ def _patch_cs35l41_kbuild(path):
     return 'cs35l41/Kbuild: TDM 宏 + 强制 obj-y 内建(显式 CS35L41_OBJS)'
 
 
+def _patch_snd_event_kbuild(path):
+    """snd_event 是 cs35l41_probe 的硬依赖, 同样强制内建。"""
+    with open(path, 'r', encoding='utf-8') as f:
+        src = f.read()
+    if MARK in src:
+        return 'soc/Kbuild: already patched'
+    forced = (
+        '\n/* %s: snd_event 强制内建(cs35l41_probe 依赖 snd_event_client_register) */\n' % MARK
+        + 'SND_EVENT_OBJS := snd_event.o\n'
+        + 'obj-y += snd_event_dlkm.o\n'
+        + 'snd_event_dlkm-y := $(SND_EVENT_OBJS)\n'
+    )
+    src = re.sub(
+        r'^(\s*)obj-\$\(CONFIG_SND_EVENT\)\s*\+=\s*snd_event_dlkm\.o\s*$',
+        r'\1# \g<0>  /* %s: 见下方强制 obj-y */' % MARK,
+        src, count=1, flags=re.M)
+    src = re.sub(
+        r'^(\s*)snd_event_dlkm-y\s*:=.*$',
+        r'\1# \g<0>  /* %s */' % MARK,
+        src, count=1, flags=re.M)
+    src = src.rstrip() + '\n' + forced
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(src)
+    return 'soc/Kbuild: snd_event 强制 obj-y 内建'
+
+
 def _patch_lahaina_conf(path):
-    """CONFIG_SND_SOC_CS35L41=y / CONFIG_SND_EVENT=y（内建，抢占原厂模块）。"""
+    """CONFIG_SND_SOC_CS35L41=y / CONFIG_SND_EVENT=y（尽力 export; 真正生效靠 Kbuild 强制）。"""
     with open(path, 'r', encoding='utf-8') as f:
         src = f.read()
     if MARK in src:
         return 'lahainaauto.conf: already patched'
     src2, n1 = re.subn(
         r'^export CONFIG_SND_SOC_CS35L41=.*$',
-        'export CONFIG_SND_SOC_CS35L41=y  /* %s: 内建, 抢占原厂 cs35l41_dlkm */' % MARK,
+        'export CONFIG_SND_SOC_CS35L41=y  /* %s */' % MARK,
         src, count=1, flags=re.M)
     src2, n2 = re.subn(
         r'^export CONFIG_SND_EVENT=.*$',
-        'export CONFIG_SND_EVENT=y  /* %s: cs35l41_probe 硬依赖 snd_event_client_register */' % MARK,
+        'export CONFIG_SND_EVENT=y  /* %s */' % MARK,
         src2, count=1, flags=re.M)
-    if n1 != 1:
-        # 没有现成行就追加
-        if 'CONFIG_SND_SOC_CS35L41' not in src2:
-            src2 += '\nexport CONFIG_SND_SOC_CS35L41=y  /* %s */\n' % MARK
-        else:
-            raise RuntimeError('lahainaauto.conf: CONFIG_SND_SOC_CS35L41 行意外')
-    if n2 != 1:
-        if 'CONFIG_SND_EVENT' not in src2:
-            src2 += '\nexport CONFIG_SND_EVENT=y  /* %s */\n' % MARK
-        else:
-            raise RuntimeError('lahainaauto.conf: CONFIG_SND_EVENT 行意外')
+    if n1 != 1 and 'CONFIG_SND_SOC_CS35L41' not in src2:
+        src2 += '\nexport CONFIG_SND_SOC_CS35L41=y  /* %s */\n' % MARK
+    if n2 != 1 and 'CONFIG_SND_EVENT' not in src2:
+        src2 += '\nexport CONFIG_SND_EVENT=y  /* %s */\n' % MARK
     with open(path, 'w', encoding='utf-8') as f:
         f.write(src2)
-    return 'lahainaauto.conf: SND_SOC_CS35L41=y + SND_EVENT=y'
+    return 'lahainaauto.conf: CS35L41=y + SND_EVENT=y'
 
 
 def patch(root):
@@ -162,6 +191,11 @@ def patch(root):
     if not os.path.isfile(p):
         raise RuntimeError('缺少 ' + p)
     msgs.append(_patch_cs35l41_kbuild(p))
+
+    p = os.path.join(root, 'techpack/audio/soc/Kbuild')
+    if not os.path.isfile(p):
+        raise RuntimeError('缺少 ' + p)
+    msgs.append(_patch_snd_event_kbuild(p))
 
     p = os.path.join(root, 'techpack/audio/config/lahainaauto.conf')
     if not os.path.isfile(p):
