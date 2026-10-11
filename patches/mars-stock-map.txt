@@ -1,0 +1,55 @@
+# mars 原厂 PCM 设备号基准表 —— stream_name → 设备号
+# 来源: LOS techpack/audio/asoc/lahaina.c 每条 link 的 {/* hw:x,N */} 注释
+#       (= 原厂 machine_dlkm 的真实编号; 与 GOLD 实机 /proc/asound/pcms 交叉验证)
+# 格式: <stream_name> <设备号>   # 注释
+# 同号多条(32/33/44/45)是互斥硬件变体, 运行时唯一性兜底会处理。
+MultiMedia1 0
+MultiMedia2 1
+VoiceMMode1 2
+VoIP 3
+MultiMedia3 4
+AFE-PROXY RX 5
+AFE-PROXY TX 6
+Compress1 7
+AUXPCM Hostless 8
+MultiMedia5 9
+Listen 1 Audio Service 10
+Compress2 11
+MultiMedia10 12
+MM_NOIRQ 13
+HDMI_RX_HOSTLESS 14
+VoiceMMode2 15
+Listen 2 Audio Service 16
+Listen 3 Audio Service 17
+Listen 4 Audio Service 18
+Listen 5 Audio Service 19
+Listen 6 Audio Service 20
+Listen 7 Audio Service 21
+Listen 8 Audio Service 22
+MultiMedia9 23
+Compress4 24
+Compress5 25
+Compress6 26
+Compress7 27
+Compress8 28
+MM_NOIRQ_2 29
+CDC_DMA Hostless 30
+TX3_CDC_DMA Hostless 31
+PRI_TDM_TX_0_HOSTLESS Capture 32
+Tertiary MI2S_TX Hostless Capture 32
+Primary MI2S_TX Hostless Capture 32
+WSA CDC DMA0 Capture 33
+MultiMedia6 34
+USB Audio Hostless 35
+SLIMBUS_7 Hostless 36
+Compress9 37
+SLIMBUS_8 Hostless 38
+TX CDC DMA5 Capture 39
+MultiMedia31 40
+MultiMedia32 41
+AFE-PROXY TX1 42
+Compress3 43
+Secondary MI2S_TX Hostless Capture 44
+DISPLAY_PORT_RX_HOSTLESS 45
+CDC_DMA Hostless_USRX 44
+CDC_DMA Hostless_USTX 45
