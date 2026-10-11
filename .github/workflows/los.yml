@@ -462,6 +462,15 @@ jobs:
           python3 "$GITHUB_WORKSPACE/patches/asoc-pcm-renum.py" "$PWD/kernel"
           grep -c 'MARS-PCM-RENUM' "$PWD/kernel/sound/soc/soc-core.c"
 
+      - name: "★声卡真修 — MARS-NUMID-FIX(id==0 的 link 不再抢 PCM 0 号)"
+        # los78 实证: msm-stub-codec 组件 use_dai_pcm_id=1 ⇒ AFE-PROXY RX/TX(id=0) 与 Media1(id=0)
+        # 都建 device 0 的 PCM ⇒ snd_pcm_add -EBUSY ⇒ snd_card_register -16 ⇒ 无声。
+        # 本步让 .id==0 的 link 回退用 rtd->num(唯一)。只改设备号计算, 不碰控制流。
+        run: |
+          set -e
+          python3 "$GITHUB_WORKSPACE/patches/asoc-pcm-numid-fix.py" "$PWD/kernel"
+          grep -c 'MARS-NUMID-FIX' "$PWD/kernel/sound/soc/soc-core.c"
+
       - name: 编译 Image
         run: |
           set -uo pipefail
