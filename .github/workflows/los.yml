@@ -462,30 +462,21 @@ jobs:
           python3 "$GITHUB_WORKSPACE/patches/asoc-pcm-renum.py" "$PWD/kernel"
           grep -c 'MARS-PCM-RENUM' "$PWD/kernel/sound/soc/soc-core.c"
 
-      - name: "★声卡真修 — MARS-NUMID-FIX(id==0 的 link 不再抢 PCM 0 号)"
-        # los78 实证: msm-stub-codec 组件 use_dai_pcm_id=1 ⇒ AFE-PROXY RX/TX(id=0) 与 Media1(id=0)
-        # 都建 device 0 的 PCM ⇒ snd_pcm_add -EBUSY ⇒ snd_card_register -16 ⇒ 无声。
-        # 本步让 .id==0 的 link 回退用 rtd->num(唯一)。只改设备号计算, 不碰控制流。
+      - name: "★PCM 编号总修复 — MARS-STOCKNUM(对齐原厂 hw:x,N)"
+        # 2026-10-12 定论(取代 numid-fix/renum 全套): 原厂编号=纯 rtd->num(lahaina.c 的
+        # hw:x,N 注释实锤); use_dai_pcm_id/be_pcm_base 路径只在我们核上被 ABI 错位垃圾
+        # (stub=1/cs35l41=-34)误触发 ⇒ 撞号。本补丁: rtd->num 为基 + 原厂基准表归位
+        # (patches/mars-stock-map.txt) + 唯一性兜底。HAL 依赖原厂号(los82 实证)。
         run: |
           set -e
-          python3 "$GITHUB_WORKSPACE/patches/asoc-pcm-numid-fix.py" "$PWD/kernel"
-          grep -c 'MARS-NUMID-FIX' "$PWD/kernel/sound/soc/soc-core.c"
+          python3 "$GITHUB_WORKSPACE/patches/asoc-pcm-stockmap.py" "$PWD/kernel"
+          grep -c 'MARS-STOCKNUM' "$PWD/kernel/sound/soc/soc-core.c"
 
-      - name: "★同源 cs35l41 — 抢占原厂功放驱动(§41.108 DSP 刷屏卡死真凶)"
-        # 原厂 cs35l41_dlkm.ko(5.4.233) 在我们内核上跑飞: 声卡一注册, HAL 初始化功放
-        # 就进入 DSP 固件下载死循环、几十万行 printk 把启动堵死。
-        # 树里源码齐全但被 TARGET_PRODUCT 门关住 ⇒ 本步拆门 + 加 mars TDM 编译宏 + 内建(=y)。
-        # 内建后原厂模块会因 duplicate symbol / already registered 被拒 ⇒ 自然抢占。
+      - name: "★同源 cs35l41 — 已停用(2026-10-12: 刷屏真凶系误读, los90 硬挂头号嫌疑)"
+        # DSP 刷屏不存在(los86 ld.bin 仅 1300 行正常装载); 卡死另有其因(编号垃圾)。
+        # 内建 cs35l41/snd_event 反而引入 los90 硬挂风险 ⇒ 停用, 用原厂 cs35l41_dlkm。
         run: |
-          set -e
-          python3 "$GITHUB_WORKSPACE/patches/cs35l41-build.py" "$PWD/kernel"
-          echo "--- 核对补丁落点 ---"
-          grep -n 'MARS-CS35L41-BUILD\|obj-y.*cs35l41' \
-            "$PWD/kernel/techpack/audio/asoc/codecs/Kbuild" || true
-          grep -n 'MARS-CS35L41-BUILD\|TARGET_PRODUCT_CS35L41_TDM' \
-            "$PWD/kernel/techpack/audio/asoc/codecs/cs35l41/Kbuild" || true
-          grep -n 'CS35L41\|SND_EVENT' \
-            "$PWD/kernel/techpack/audio/config/lahainaauto.conf" || true
+          echo "cs35l41 同源内建已停用(真凶=PCM 编号垃圾, 见 MARS-STOCKNUM 步骤)"
 
       - name: 编译 Image
         run: |
@@ -517,34 +508,9 @@ jobs:
           fi
           echo "build.log 无 error: ✓"
 
-      - name: "验收 cs35l41 已编入 Image(同源功放驱动闸门)"
-        # 2026-10-11 §41.108: 原厂 cs35l41 跑飞是音频卡死真凶; 本步确保我们自己的
-        # cs35l41 真的进了产物, 否则刷了也等于没修(编译缓存/门没生效都可能静默漏掉)。
+      - name: "验收 cs35l41 已编入 Image — 已停用(见上)"
         run: |
-          set -e
-          IMG=kernel/out/arch/arm64/boot/Image
-          MAP=kernel/out/System.map
-          echo "--- Image 里的 cs35l41 痕迹 ---"
-          N=$(strings -a "$IMG" | grep -ci cs35l41 || true)
-          echo "strings Image | grep -ci cs35l41 = $N"
-          if [ -f "$MAP" ]; then
-            echo "--- System.map 里的 cs35l41 符号 ---"
-            grep -c 'cs35l41' "$MAP" || true
-            grep 'cs35l41' "$MAP" | head -8 || true
-          else
-            echo "(无 System.map, 用 nm 看 vmlinux)"
-            nm kernel/out/vmlinux 2>/dev/null | grep -c cs35l41 || true
-          fi
-          if [ "$N" -eq 0 ]; then
-            echo "::error::Image 里没有任何 cs35l41 痕迹 ⇒ 补丁没生效或没编进去, 拒绝上传假产物"
-            echo "--- 回看补丁落点 ---"
-            grep -n 'cs35l41\|CS35L41' kernel/techpack/audio/asoc/codecs/Kbuild || true
-            grep -n 'CS35L41\|SND_EVENT' kernel/techpack/audio/config/lahainaauto.conf || true
-            echo "--- build.log 里 cs35l41 相关 ---"
-            grep -a 'cs35l41' "$GITHUB_WORKSPACE/build.log" | head -20 || true
-            exit 1
-          fi
-          echo "cs35l41 已编入 Image ✓ ($N 处痕迹)"
+          echo "闸门已停用: cs35l41 不再内建(用原厂 DLKM, 真机实证 DSP 装载正常)"
 
       - name: 编译内核模块并打包(可选)
         if: github.event.inputs.modules == '1'
