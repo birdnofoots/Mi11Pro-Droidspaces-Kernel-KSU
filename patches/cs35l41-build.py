@@ -79,7 +79,12 @@ def _patch_codecs_kbuild(path):
 
 
 def _patch_cs35l41_kbuild(path):
-    """给 cs35l41/Kbuild 的 CDEFINES 加上 mars/star 的 TDM 编译宏。"""
+    """给 cs35l41/Kbuild 加 TDM 编译宏, 并把 obj-$(CONFIG_SND_SOC_CS35L41) 强制成 obj-y。
+
+    2026-10-11 los89 实测教训: 仅靠 `export CONFIG_SND_SOC_CS35L41=y`(lahainaauto.conf)
+    传不进深层 kbuild 的 `ifdef`/`obj-$()` ⇒ 只 AR 了一个空 built-in.a, Image 里零 cs35l41。
+    这里直接把 obj 行写死成 obj-y + 显式对象列表, 不依赖任何 CONFIG 传播。
+    """
     with open(path, 'r', encoding='utf-8') as f:
         src = f.read()
     if MARK in src:
@@ -93,9 +98,27 @@ def _patch_cs35l41_kbuild(path):
         + 'CDEFINES += -DCONFIG_TARGET_PRODUCT_STAR /* %s: star 血统 VPBR/DAI 名 */' % MARK
     )
     src = src.replace(needle, ins, 1)
+
+    # 强制内建: 不用 obj-$(CONFIG_SND_SOC_CS35L41), 不用 ifdef 填 CS35L41_OBJS
+    forced = (
+        '\n/* %s: 强制内建(los89 教训: CONFIG export 进不了深层 kbuild) */\n' % MARK
+        + 'CS35L41_OBJS := cs35l41.o cs35l41-i2c.o cs35l41-tables.o wm_adsp.o\n'
+        + 'obj-y += cs35l41_dlkm.o\n'
+        + 'cs35l41_dlkm-y := $(CS35L41_OBJS)\n'
+    )
+    # 注释掉原来的 obj-$(CONFIG_SND_SOC_CS35L41) 行, 避免重复定义
+    src = re.sub(
+        r'^(\s*)obj-\$\(CONFIG_SND_SOC_CS35L41\)\s*\+=\s*cs35l41_dlkm\.o\s*$',
+        r'\1# \g<0>  /* %s: 见下方强制 obj-y */' % MARK,
+        src, count=1, flags=re.M)
+    src = re.sub(
+        r'^(\s*)cs35l41_dlkm-y\s*:=.*$',
+        r'\1# \g<0>  /* %s */' % MARK,
+        src, count=1, flags=re.M)
+    src = src.rstrip() + '\n' + forced
     with open(path, 'w', encoding='utf-8') as f:
         f.write(src)
-    return 'cs35l41/Kbuild: 已加 CONFIG_TARGET_PRODUCT_CS35L41_TDM + _STAR'
+    return 'cs35l41/Kbuild: TDM 宏 + 强制 obj-y 内建(显式 CS35L41_OBJS)'
 
 
 def _patch_lahaina_conf(path):
