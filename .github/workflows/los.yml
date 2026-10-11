@@ -471,6 +471,22 @@ jobs:
           python3 "$GITHUB_WORKSPACE/patches/asoc-pcm-numid-fix.py" "$PWD/kernel"
           grep -c 'MARS-NUMID-FIX' "$PWD/kernel/sound/soc/soc-core.c"
 
+      - name: "★同源 cs35l41 — 抢占原厂功放驱动(§41.108 DSP 刷屏卡死真凶)"
+        # 原厂 cs35l41_dlkm.ko(5.4.233) 在我们内核上跑飞: 声卡一注册, HAL 初始化功放
+        # 就进入 DSP 固件下载死循环、几十万行 printk 把启动堵死。
+        # 树里源码齐全但被 TARGET_PRODUCT 门关住 ⇒ 本步拆门 + 加 mars TDM 编译宏 + 内建(=y)。
+        # 内建后原厂模块会因 duplicate symbol / already registered 被拒 ⇒ 自然抢占。
+        run: |
+          set -e
+          python3 "$GITHUB_WORKSPACE/patches/cs35l41-build.py" "$PWD/kernel"
+          echo "--- 核对补丁落点 ---"
+          grep -n 'MARS-CS35L41-BUILD\|obj-y.*cs35l41' \
+            "$PWD/kernel/techpack/audio/asoc/codecs/Kbuild" || true
+          grep -n 'MARS-CS35L41-BUILD\|TARGET_PRODUCT_CS35L41_TDM' \
+            "$PWD/kernel/techpack/audio/asoc/codecs/cs35l41/Kbuild" || true
+          grep -n 'CS35L41\|SND_EVENT' \
+            "$PWD/kernel/techpack/audio/config/lahainaauto.conf" || true
+
       - name: 编译 Image
         run: |
           set -uo pipefail
@@ -499,6 +515,35 @@ jobs:
             exit 1
           fi
           echo "build.log 无 error: ✓"
+
+      - name: "验收 cs35l41 已编入 Image(同源功放驱动闸门)"
+        # 2026-10-11 §41.108: 原厂 cs35l41 跑飞是音频卡死真凶; 本步确保我们自己的
+        # cs35l41 真的进了产物, 否则刷了也等于没修(编译缓存/门没生效都可能静默漏掉)。
+        run: |
+          set -e
+          IMG=kernel/out/arch/arm64/boot/Image
+          MAP=kernel/out/System.map
+          echo "--- Image 里的 cs35l41 痕迹 ---"
+          N=$(strings -a "$IMG" | grep -ci cs35l41 || true)
+          echo "strings Image | grep -ci cs35l41 = $N"
+          if [ -f "$MAP" ]; then
+            echo "--- System.map 里的 cs35l41 符号 ---"
+            grep -c 'cs35l41' "$MAP" || true
+            grep 'cs35l41' "$MAP" | head -8 || true
+          else
+            echo "(无 System.map, 用 nm 看 vmlinux)"
+            nm kernel/out/vmlinux 2>/dev/null | grep -c cs35l41 || true
+          fi
+          if [ "$N" -eq 0 ]; then
+            echo "::error::Image 里没有任何 cs35l41 痕迹 ⇒ 补丁没生效或没编进去, 拒绝上传假产物"
+            echo "--- 回看补丁落点 ---"
+            grep -n 'cs35l41\|CS35L41' kernel/techpack/audio/asoc/codecs/Kbuild || true
+            grep -n 'CS35L41\|SND_EVENT' kernel/techpack/audio/config/lahainaauto.conf || true
+            echo "--- build.log 里 cs35l41 相关 ---"
+            grep -a 'cs35l41' "$GITHUB_WORKSPACE/build.log" | head -20 || true
+            exit 1
+          fi
+          echo "cs35l41 已编入 Image ✓ ($N 处痕迹)"
 
       - name: 编译内核模块并打包(可选)
         if: github.event.inputs.modules == '1'
