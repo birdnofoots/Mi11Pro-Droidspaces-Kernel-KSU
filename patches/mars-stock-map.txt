@@ -1,5 +1,9 @@
 # mars 原厂 PCM 设备号基准表 —— stream_name → 设备号
 # 来源: LOS techpack/audio/asoc/lahaina.c 每条 link 的 {/* hw:x,N */} 注释
+# ★2026-10-12 独立旁证: LineageOS mars 设备树 audio/audio_platform_info.xml 的 <pcm_ids>
+#   (Qualcomm HAL usecase→PCM 设备号) 逐条吻合 —— LowLatency=9/OFFLOAD=7,11,43,24-28/
+#   VoiceMMode=2,15/AFE-PROXY=5,6,42/ULL=13/MMAP=29/VOIP=12/SILENCE=23/CAL_TX=33/COMPRESS2=37
+#   ⇒ hw:x,N = 原厂真值实锤, 不只是注释。
 #       (= 原厂 machine_dlkm 的真实编号; 与 GOLD 实机 /proc/asound/pcms 交叉验证)
 # 格式: <stream_name> <设备号>   # 注释
 # 同号多条(32/33/44/45)是互斥硬件变体, 运行时唯一性兜底会处理。
