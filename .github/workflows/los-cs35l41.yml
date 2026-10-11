@@ -1,0 +1,124 @@
+name: LOS 5.4.242 mars kernel (cs35l41 fix)
+
+on:
+  workflow_dispatch:
+    inputs:
+      los_ref:
+        description: 'LOS kernel ref'
+        required: false
+        default: 'lineage-20'
+      config:
+        description: '内核配置文件'
+        required: true
+        default: 'mars_factory.config'
+      logdump:
+        description: '接入 logdump 连续落盘驱动(1=是)'
+        required: false
+        default: '0'
+      wlanblock:
+        description: 'WLAN 门禁(1=开启)'
+        required: false
+        default: '1'
+      ignore_vermagic:
+        description: '忽略 vermagic 检查(1=是)'
+        required: false
+        default: '1'
+      mi_syms:
+        description: '接入 MIUI 符号桩(1=是)'
+        required: false
+        default: '1'
+      mi_syms_audio:
+        description: '接入音频符号桩(1=是)'
+        required: false
+        default: '1'
+      kabi:
+        description: 'KABI 兼容(1=是)'
+        required: false
+        default: '1'
+      allbuiltin:
+        description: '全部内建(1=是)'
+        required: false
+        default: '1'
+      force_m:
+        description: '强制为模块的驱动'
+        required: false
+        default: 'CNSS2,CNSS_GENL,WCNSS_MEM_PRE_ALLOC,SLIMBUS,SLIMBUS_MSM_NGD,BTFM_SLIM,MSM_BT_POWER'
+      force_y:
+        description: '强制为内建的驱动'
+        required: false
+        default: 'CNSS_QCA6490'
+      hwid_deexport:
+        description: 'hwid 去导出(1=是)'
+        required: false
+        default: '1'
+      modules:
+        description: '编译内核模块(1=是)'
+        required: false
+        default: '1'
+      firmware_embed:
+        description: '固件内建(1=是)'
+        required: false
+        default: '1'
+      los_commit:
+        description: 'LOS 内核提交'
+        required: true
+        default: 'd42d2eb6c'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev bc bison flex
+
+      - name: 安装 clang 11.0.2
+        run: |
+          wget https://android.googlesource.com/toolchain/llvm-project/+archive/refs/heads/android-11.0.2-release.tar.gz
+          tar -xzf android-11.0.2-release.tar.gz
+          export PATH=$PWD/toolchain/llvm-project/bin:$PATH
+
+      - name: 克隆 LOS 内核
+        run: |
+          git clone https://github.com/LineageOS/android_kernel_xiaomi_sm8350.git kernel
+          cd kernel
+          git checkout ${{ github.event.inputs.los_commit }}
+
+      - name: 配置
+        run: |
+          cd kernel
+          cp arch/arm64/configs/${{ github.event.inputs.config }} .config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+
+      - name: 应用 cs35l41 补丁
+        run: |
+          cd kernel
+          python3 $GITHUB_WORKSPACE/patches/cs35l41-build.py .
+
+      - name: 编译 Image
+        run: |
+          cd kernel
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image
+
+      - name: 验收 cs35l41
+        run: |
+          cd kernel
+          IMG=out/arch/arm64/boot/Image
+          echo "--- Image 里的 cs35l41 痕迹 ---"
+          N=$(strings -a "$IMG" | grep -ci cs35l41 || true)
+          echo "strings Image | grep -ci cs35l41 = $N"
+          if [ "$N" -eq 0 ]; then
+            echo "::error::Image 里没有任何 cs35l41 痕迹"
+            exit 1
+          fi
+          echo "cs35l41 已编入 Image ✓ ($N 处痕迹)"
+
+      - name: 上传 Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image-los-cs35l41
+          path: kernel/out/arch/arm64/boot/Image
