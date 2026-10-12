@@ -19,6 +19,26 @@ echo "== [KSU] 挂进内核树(等价官方 setup.sh: 软链 + Makefile + Kconfi
 ln -sfn ../KernelSU/kernel drivers/kernelsu
 grep -q 'kernelsu' drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
 grep -q 'drivers/kernelsu/Kconfig' drivers/Kconfig || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+echo "== [KSU] ★MARS 修复: escape_to_root 清 securebits(上游 v0.9.5 缺陷) =="
+python3 - "KernelSU/kernel/core_hook.c" <<'PYFIX'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "\t// disable seccomp"
+fix = (
+    "\t// MARS-SECUREBITS-FIX(2026-10-13): Android zygote/adbd 给进程留 securebits=0x2f\n"
+    "\t// (NOROOT|NOROOT_LOCKED|NO_SETUID_FIXUP|NO_SETUID_FIXUP_LOCKED|KEEP_CAPS_LOCKED)。\n"
+    "\t// 上游 v0.9.5 escape_to_root 忘了清零 ⇒ su/root 链全程继承锁位 ⇒\n"
+    "\t// PR_SET_KEEPCAPS/PR_SET_SECUREBITS 恒 EPERM(ping 报错)、systemd 服务孵化失败\n"
+    "\t// (容器无 IP/终端进不去)。锁定位用户态不可逆, 必须内核直写清零。\n"
+    "\tcred->securebits = 0;\n\n"
+)
+assert s.count(anchor) == 1, "escape_to_root anchor not unique!"
+s = s.replace(anchor, fix + anchor, 1)
+open(p, 'w').write(s)
+print("MARS-SECUREBITS-FIX injected")
+PYFIX
+grep -n 'MARS-SECUREBITS-FIX\|cred->securebits = 0' KernelSU/kernel/core_hook.c | head -3
 echo "== [KSU] 集成核对 =="
 ls drivers/kernelsu/Makefile
 grep -n 'kernelsu' drivers/Makefile drivers/Kconfig
