@@ -1717,3 +1717,17 @@ KSU 内建（`=y`）走正规 `security_add_hooks`（hack 分支仅 `=m` 编译�
 **状态**：los98-ksu（run 38280200089）已刷入真机：root ✓（su → `u:r:su:s0`）、`CONFIG_KSU=y` ✓、
 securebits 修复实证 ✓；容器验证被根因②挡住 ⇒ los99-ksu（run 待记）修复后重验。
 文档：`docs/FLASH-GUIDE.md` 新增「root 方案选择：APatch vs KernelSU」表 + 三红线；`README.md` 双方案指引。
+
+**根因③（los100-ksu 修）`MARS-CLOSE-RANGE-436`**：los99-ksu 上双修复全绿（securebits 0x0、能力全 ffff、
+unshare 六命名空间 rc=0、ds check 28/28、alpine/openwrt 无 shim NAT 通），但 **ubuntu 仍无 IP**：
+systemd 服务孵化报 `status=202/FDS`（exec spawn 的 fd-setup 失败码）。syscall 436 实测返回 **EINVAL 而非
+ENOSYS** ⇒ 定位：**本 QGKI 树把 `process_madvise` 抢占了 436 号**（主线编号 436=`close_range`、
+440=`process_madvise`；该树是 close_range 出生(5.9)前的 backport 抢号）。glibc 的 `close_range()` 调 436
+收到 EINVAL ⇒ **不是 ENOSYS 就不回退 close-loop** ⇒ systemd fd 清理/孵化失败（dbus/ssh/networkd 全挂，
+networkd 的 ExecCondition 也202/FDS）⇒ 容器拿不到 IP。**与 root 方案无关**——APatch 的 supercall 是加塞 436、
+KSU 没动它，两种方案都撞；APatch 下 nr436-shim 之所以有效就是把 436 伪装成 ENOSYS。
+修法（全构建通用）：`patches/close-range-436.py` 恢复主线编号（436→close_range 新实现、437-439→
+sys_ni_syscall 显式 ENOSYS 防表项 NULL 空洞、440→process_madvise 还给主线，bionic 的 process_madvise
+从此可用），`fs/file.c` 追加最小正确的 `SYSCALL_DEFINE3(close_range,...)`。
+诊断备忘：**202/FDS = systemd exec spawn 失败码**，看到它先查 syscall 436 返回值（`syscall(436,0,~0u,0)`
+该是 ENOSYS/range-EINVAL 而非"像个真 syscall 的 EINVAL"）。
