@@ -1752,3 +1752,5 @@ root 方案可选（APatch vs KSU）已写入 `docs/FLASH-GUIDE.md`（对照表+
 结论差异一句话：**APatch 的 supercall 加塞 436 ⇒ 容器必须 nr436-shim；KSU 内核由 MARS-CLOSE-RANGE-436
 把 436 还给 close_range 真实现 ⇒ 容器无需 shim**（nr436-shim 在 APatch 方案下仍有效可用）。
 新链路备忘：mars 改走一加 USB 直连/WiFi `192.168.43.246:5555`（原 192.168.1.x/149 链路随出门作废）。
+USB 直连排障：容器里 `lsusb` 能见 mars（`2717:ff48`）但 adb 扫不到 = 缺 `/dev/bus/usb` 节点 ⇒
+`scripts/usb-link-setup.sh` 自动 mknod(major 189, minor=(bus-1)*128+dev-1) + 重启 adb server 即通。

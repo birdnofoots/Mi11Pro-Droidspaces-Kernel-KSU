@@ -19,8 +19,12 @@
   + allbuiltin + kabi + ignore_vermagic + mi_syms + hwid_deexport + `wlanblock=1`，CI run `37962039123`
 - **WiFi 靠原厂栈**（不是我们自编的）：INI 不许被盖 + `/data/adb/service.d/99-wlan-mars.sh`
   按固定顺序装原厂 `cnss2.ko` → CBC → `qca_cld3_wlan.ko`。细节见 `work/keep-p3/MANIFEST.md` §4。
-- 手机地址：USB `d6fba222`（接在 149 上，本容器的 adb 看不到，要 `ssh justin@192.168.1.149` 再 `adb`）；
-  WiFi IP `192.168.1.145`。
+- 手机地址（2026-10-13 起改线）：**USB `d6fba222` 直接接在一加上，本容器可直连** `adb -s d6fba222`。
+  ⚠️ 容器里 `lsusb` 能看到 mars（`2717:ff48`）但可能缺 `/dev/bus/usb` 节点 ⇒ adb 扫不到：
+  跑 `bash scripts/usb-link-setup.sh`（自动 mknod major 189 补节点 + 重启 adb server）。
+  WiFi adb：`adb -s 192.168.43.246:5555`（一加热点网段 `192.168.43.x`，IP 会变，全段扫 5555 找
+  `product:mars_eea`；重启后若连不上需重新 `adb tcpip 5555` 或重开无线调试）。
+  旧链路（手机插 149 + `192.168.1.145` + `ssh justin@192.168.1.149`）自 2026-10-13 出门起作废。
 - **绝不动一加手机**（`172.28.0.1:5555` 是宿主机！）。只操作 mars。
 
 ## 硬约束
@@ -50,9 +54,9 @@
 
 ## 环境
 
-- 工作机 = 一加 12 上的 aarch64 容器（本容器，编译派发/文档）；**mars 手机插在 149 那台 x86_64 机器上**：
-  手机上的一切 `adb`/`fastboot`/刷机/截图都要先
-  `ssh justin@192.168.1.149` 再 `adb ...`（本容器直接 `adb` 看不到手机）。
+- 工作机 = 一加 12 上的 aarch64 容器（本容器，编译派发/文档）；**mars 手机直插在一加上（USB 直连）**：
+  `adb -s d6fba222` 直接可用（缺节点跑 `scripts/usb-link-setup.sh`）；WiFi 备用 `adb -s 192.168.43.246:5555`。
+  （旧况：手机插在 149 x86_64 机器上、要 `ssh justin@192.168.1.149` 转发——2026-10-13 起作废。）
 - 149 上的关键路径：`~/mars-build/`（`artifacts/`、`KEEP/`、`ref/`、`tools/make-bootimg.py`）、
   `~/mars/eng/builds/apatch-patched-boot-0.13.3.img`（GOLD）。
   149 侧所有工具脚本现在都在 `~/mars-keep/2026-10-10-tmp-archive/scripts-mars/`（`flash-local.sh` `gold-restore.sh`
@@ -185,10 +189,15 @@ adb shell 'getprop ro.boot.slot_suffix; cat /proc/version'
 - 原厂 GOLD：149 `~/mars/eng/builds/apatch-patched-boot-0.13.3.img`（md5 `8fcf3576…`）/
   `work/boot_a-stock-69m.img`（md5 `58916775…`，分区前 72MB）
 
-## 常用命令（当前流程：手机在 149 上）
+## 常用命令（当前流程：mars 直插一加 USB，本容器直连）
 
 ```bash
-# 0) 所有手机操作都经 149
+# 0) USB 直连(缺节点先跑 usb-link-setup.sh; WiFi 备用 adb -s 192.168.43.246:5555)
+bash scripts/usb-link-setup.sh
+A='adb -s d6fba222'
+$A shell "getprop sys.boot_completed; cat /proc/version"
+
+# 旧流程(2026-10-13 前, 手机在 149 上) — 保留备查: 所有手机操作都经 149
 S='ssh -o BatchMode=yes -o ConnectTimeout=25 -o StrictHostKeyChecking=no \
    -o UserKnownHostsFile=/dev/null justin@192.168.1.149'
 
