@@ -266,6 +266,17 @@ jobs:
           echo "=== 关键 config ==="
           grep -E "^CONFIG_(PID_NS|IPC_NS|USER_NS|SYSVIPC|POSIX_MQUEUE|DEVTMPFS|CGROUPS|CGROUP_DEVICE|MODVERSIONS|LOCALVERSION|CFI_CLANG|LTO_CLANG|THINLTO)" out/.config || true
 
+      - name: "★MARS-CLOSE-RANGE-436(恢复主线 syscall 编号, 修 glibc close_range 撞号)"
+        # 本 QGKI 树把 process_madvise 抢占 436(主线 436=close_range) ⇒ glibc close_range()
+        # 收 EINVAL 不回退 ⇒ systemd fd 清理/孵化失败(202/FDS、容器无网)。与 root 方案无关,
+        # 全部构建一律打(437-439 显式 ENOSYS 防表项空洞; 440 还给 process_madvise)。
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/patches/close-range-436.py" "$PWD/kernel"
+          cd kernel
+          grep -n '__NR_close_range 436\|__NR_process_madvise 440\|__NR_syscalls 441' include/uapi/asm-generic/unistd.h
+          grep -n 'SYSCALL_DEFINE3(close_range' fs/file.c
+
       - name: "★KernelSU v0.9.5 整合(仅 extra_config 含 KSU; root 方案 B)"
         if: contains(github.event.inputs.extra_config, 'KSU')
         # 非 GKI(5.4) 上最新 KSU 的 boot patch 无效 ⇒ 必须 v0.9.5 源码整合(kprobe 法)。
