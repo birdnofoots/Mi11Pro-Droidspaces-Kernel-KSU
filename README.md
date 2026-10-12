@@ -15,6 +15,22 @@
 | 蓝牙 | ✅（适配成功） |
 | Droidspaces 容器（`droidspaces check` 28/28） | ✅ |
 
+### 📸 真机截图（mars 实拍）
+
+> 2026-10-12 los96 刷入验收后拍摄（Droidspaces App ×4 + APatch root 管理 ×2），
+> 另附 2026-10-11 一张作对照。原图在 [`docs/screenshots/`](docs/screenshots)。
+
+| | |
+|---|---|
+| <img src="docs/screenshots/droidspaces-2026-10-12-a.jpg" width="270"> | <img src="docs/screenshots/droidspaces-2026-10-12-b.jpg" width="270"> |
+| *Droidspaces App · 10-12 21:12* | *Droidspaces App · 10-12 21:12* |
+| <img src="docs/screenshots/droidspaces-2026-10-12-c.jpg" width="270"> | <img src="docs/screenshots/droidspaces-2026-10-12-d.jpg" width="270"> |
+| *Droidspaces App · 10-12 21:12* | *Droidspaces App · 10-12 21:12* |
+| <img src="docs/screenshots/apatch-2026-10-12-a.jpg" width="270"> | <img src="docs/screenshots/apatch-2026-10-12-b.jpg" width="270"> |
+| *APatch root 管理 · 10-12 21:13* | *APatch root 管理 · 10-12 21:13* |
+| <img src="docs/screenshots/droidspaces-2026-10-11.jpg" width="270"> | |
+| *Droidspaces App · 10-11（对照）* | |
+
 **直接使用**：下载 [Release `los96-audio-final`](../../releases) 里的
 `boot-Image-los96.img` + `99-wlan-mars.sh`，按 [`docs/FLASH-GUIDE.md`](docs/FLASH-GUIDE.md) 刷入。
 md5: `boot-Image-los96.img` = `a18c89f2ced96836bee138ee20ceb33c`。
