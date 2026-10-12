@@ -8,8 +8,11 @@ Agent 预设无报错，拓扑与一加工作区一致。**已重启自愈验收
 - **地址**：`http://<mars 的 WiFi IP>:3080/`（当前 `http://192.168.43.246:3080/`；IP 随网络变化，
   每次开机后 `dsh-url-lan.txt` 会带最新 IP）
 - **Basic Auth**：`admin` / `PiTqoTJ37PO1nvUy`
-- **一键入口 `http://<IP>:3080/tk`**（推荐收藏这个）：同样先过 Basic Auth，页面自动带 token 跳转进 GUI、
-  换好 cookie——首次配对就点它；之后直接开 `http://<IP>:3080/` 即可。
+- **token 已固定**（2026-10-13）：永久收藏
+  `http://192.168.43.246:3080/?token=at6HF2V8E86jEE2tY0XamVl2D30VTEF3p739WonnSYU`
+  （实现：补丁 `dsh-client-connection/lib/index.js` 的 processLaunchToken 认 `DSH_LAUNCH_TOKEN` 环境变量；
+  token 存容器 `/root/.dsh/.launch-token`，wrapper 启动时注入。补丁有 `.bak-token` 备份，dsh 升级后需重打。）
+- **一键入口 `http://<IP>:3080/tk`**：先过 Basic Auth，页面自动带 token 跳转进 GUI、换好 cookie。
 - 备用：手机存储 **`/sdcard/dsh-url-lan.txt`** 有完整 token URL（每次开机自动更新）。
   cookie 长期有效（实测重启后旧 cookie 依然 200）。
 
