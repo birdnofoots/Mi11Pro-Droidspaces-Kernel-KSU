@@ -13,11 +13,14 @@ adb devices
 #    ⚠️ 若 USB 与 WiFi 两个设备同时在线，先 adb disconnect 192.168.1.145:5555
 #       留 USB 单通道，否则裸 adb 命令会报 "more than one device"
 
-# 1) 刷入（boot.img 已打包好，直接刷活动槽 boot_a）
+# 1) ★先打 root 补丁，再刷（净版镜像直接刷会丢 root ⇒ 开机脚本不跑 ⇒ 没 WiFi！）
+#    Release 里的 boot-Image-los96.img 是"净版"（未打 root 补丁）。
+#    方式 A（推荐，已 root 设备）：用本项目 flash-local.sh，它会自动 APatch 打补丁→dd→回读
+#    方式 B（任意设备）：装 APatch App → "选择并修补一个文件" → 选 boot-Image-los96.img
+#      → 产出 patched_xxx.img 再刷它：
 adb reboot bootloader
-fastboot flash boot_a boot-Image-los96.img
+fastboot flash boot_a patched_boot-Image-los96.img   # ← 刷打过补丁的！
 fastboot reboot
-#    （手机端 dd 方式见 §5；149 上也可用 flash-local.sh 自动化）
 
 # 2) 装开机脚本（★ WiFi 的命根子，必做）
 adb push 99-wlan-mars.sh /data/local/tmp/
