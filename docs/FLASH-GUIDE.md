@@ -5,6 +5,45 @@
 
 ---
 
+## ★ root 方案选择：APatch vs KernelSU（用户自选，2026-10-13 起）
+
+> 两种 root 方案**择一使用**，差异核心在一句话：**APatch 的 KernelPatch 会占用 syscall 436
+> （"supercall"），而 KSU 不占** ⇒ 内核对 glibc/systemd 的 `close_range(436)` 行为不同
+> ⇒ **APatch 方案下容器要装 `nr436-shim`，KSU 方案下不用**。
+
+|  | **方案 A：APatch（默认）** | **方案 B：KernelSU v0.9.5** |
+|---|---|---|
+| root 原理 | 刷机时 `boot_patch` 注入 KernelPatch → `apd`/supercall(nr 436) | 内核源码整合 `drivers/kernelsu`（kprobe + LSM 钩子，prctl IPC） |
+| **syscall 436** | **被 supercall 占用**（glibc `close_range` 撞号 ⇒ systemd 服务孵化失败） | **空闲**（436 = ENOSYS，systemd 自然回退） |
+| **容器 NAT** | **每容器必须装 `nr436-shim`**（见下节） | **不需要任何 shim**，直通 |
+| 镜像 | 净版 + APatch App/flash-local.sh **打补丁后**再刷 | **净版直接刷，绝不能打 APatch 补丁** |
+| root 管理 | APatch App（`me.bmax.apatch`） | KernelSU 管理器 **v0.9.5**（`me.weishu.kernelsu`，装同版本避免版本错配） |
+| 开机脚本 | `/data/adb/service.d/`（apd 执行） | `/data/adb/service.d/`（ksud 执行，路径不变） |
+| 构建 | GOLD JSON 常规构建 | 构建时 `extra_config` 里加标记 **`KSU`**（自动整合 v0.9.5 + `MARS-SECUREBITS-FIX` + `MARS-ROOTCAP-FIX`） |
+| 已知坑 | 436 撞号（shim 根治） | ① 需 `CONFIG_KPROBES=y`（我们 config 已带，CI 有断言）<br>② **必须带 `MARS-SECUREBITS-FIX`**（上游 v0.9.5 `escape_to_root` 不清 securebits ⇒ Android 的 0x2f 锁位遗传 ⇒ ping/systemd 全瘫）<br>③ 刷后需在管理器里授权"Shell"才有 adb root<br>④ **必须带 `MARS-ROOTCAP-FIX`**（`default_root_profile` 是零初始化 static、缓存只靠管理器下发 ⇒ 重启后 `escape_to_root` 发出**零能力 root**（uid=0 但 CapEff/CapBnd 全 0）⇒ unshare/chmod/容器起不来/droidspaces check 全挂） |
+
+### 方案 A 步骤（APatch，沿用现状）
+1. 净版镜像 → APatch 打补丁（方式 A/B 见下方"快速通道"）→ 刷 `boot_a`；
+2. 装开机脚本 `99-wlan-mars.sh`（WiFi 命根子）；
+3. **每个容器**装一次 `nr436-shim`（见下节），否则现代 systemd 发行版容器无网。
+
+### 方案 B 步骤（KSU）
+1. CI 构建：`extra_config` 加 `KSU` 标记（产出 `los98-ksu` 及以后）；
+2. **裸刷净版**（不打补丁）：`adb push boot-xxx.img` → `dd of=/dev/block/by-name/boot_a` → 回读校验 → 重启
+   （或 `fastboot flash boot_a boot-xxx.img`）；
+3. 装 **KernelSU 管理器 v0.9.5** APK（`adb install` 被 MIUI 拦时用 `su -c pm install`）；
+4. 打开管理器 →「超级用户」→ 给 **Shell** 打开允许（否则 adb shell 无 root）；
+5. 开机脚本照旧放 `/data/adb/service.d/`（ksud 会执行）；
+6. **容器无需 shim**，NAT 直接验证。
+7. 刷后自检（可选但建议）：`su -c /data/local/tmp/droidspaces check` 应 28/28；`grep CapEff /proc/self/status` 应为 `ffffffffffffffff`（若全 0 = 缺 `MARS-ROOTCAP-FIX`）。
+
+### ⚠️ 红线（不能混）
+- **APatch 打过补丁的 boot + KSU 内核** = 禁止（436 重新被占 + 双钩子冲突）；
+- 同一 boot 镜像**只走一种**方案；切换 = 用对应镜像重刷；
+- 不要把 KernelSU 管理器与 APatch 同时当 root 源（`/data/adb` 下两套用户态会话并存易混）。
+
+---
+
 ## 0. 快速通道（推荐）：刷 Release 的日用完全体 los96
 
 ```bash

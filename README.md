@@ -36,7 +36,7 @@
 md5: `boot-Image-los96.img` = `a18c89f2ced96836bee138ee20ceb33c`。
 ⚠️ **镜像是净版（未打 root 补丁）**：刷前先用 APatch App"选择并修补一个文件"打补丁（或走
 `flash-local.sh` 自动打），否则没有 root ⇒ `/data/adb/service.d/99-wlan-mars.sh` 不执行 ⇒ 无自动 WiFi。
-root 方案 = APatch（本仓不含 KernelSU；非 GKI 内核若要 KSU 须源码集成 v0.9.5，见讨论 §非GKI）。
+**root 方案二选一**：APatch（默认，容器需 `nr436-shim`）或 **KernelSU v0.9.5**（构建加 `KSU` 标记源码整合，容器免 shim）——见 [`docs/FLASH-GUIDE.md`](docs/FLASH-GUIDE.md)「root 方案选择」。
 
 **文档索引**：
 - [`docs/FLASH-GUIDE.md`](docs/FLASH-GUIDE.md) — **刷机指南与注意事项（唯一权威）**

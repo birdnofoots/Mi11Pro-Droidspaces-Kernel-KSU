@@ -1681,3 +1681,39 @@ I2C/AFE 死锁持住 CPU → hh-watchdog 咬口(§J)。los93 的 75/85s 快照(b
 - **遗留**: openwrt(rootfs.img)的 shim 未装(两次 loop 挂载均在挂载瞬间断线, 与手机软重启重合,
   疑镜像脏/挂载不稳 ⇒ 下次用 `mount -o loop,ro,norecovery` + 超时保护重试);
   内核级方案(los97 把 436 改 ENOSYS/补真 close_range)**无解**——kpatch 在刷机时覆写表项, 用户态 seccomp 适配层即正解。
+
+---
+
+## ★★★★★★ 2026-10-13 00:0x–02:0x 收尾㉓：**KSU root 方案落地（los9x-ksu）+ 两大内核级修复**（securebits 锁位 / root profile 零能力）
+
+**目标**（用户）：专做一版 KSU root，先验证 root 能用；root 方案（APatch vs KSU）做成用户自选并在文档注明差异；
+KSU 方案下三容器**不装 shim** 验 NAT。
+
+**实现**：`patches/ksu-integrate.sh`（CI 步骤 `★KernelSU v0.9.5 整合`，`extra_config` 含标记 `KSU` 时启用；
+workflow_dispatch 25 输入上限 ⇒ 不新增 input）。整合 = clone tiann/KernelSU@v0.9.5 → `drivers/kernelsu`
+软链 → Makefile/Kconfig 挂载 → `CONFIG_KSU=y + KPROBE_EVENTS` + 断言。内核侧 v0.9.5 为 prctl IPC
+（`KERNEL_SU_OPTION=0xDEADBEEF`），436 保持 ENOSYS ⇒ 容器**无需 nr436-shim**（与 APatch 的关键差异）。
+
+**根因①（los98-ksu 修）`MARS-SECUREBITS-FIX`**：Android zygote/adbd 给进程留 `securebits=0x2f`
+（NOROOT|NOROOT_LOCKED|NO_SETUID_FIXUP|NO_SETUID_FIXUP_LOCKED|KEEP_CAPS_LOCKED），**锁定位用户态不可逆且遗传**。
+上游 v0.9.5 `escape_to_root` 不清零 ⇒ su/root/容器全链继承锁位 ⇒ `PR_SET_KEEPCAPS`/`PR_SET_SECUREBITS`
+恒 EPERM（`ping: prctl: Operation not permitted`）、systemd 服务孵化失败（dev-mqueue.mount 等全挂 ⇒
+ubuntu 容器无 IP/终端进不去；alpine(busybox)/openwrt(procd) 不用这些 prctl 故无症状）。
+修法：`escape_to_root` 里内核直写 `cred->securebits = 0;`（绕开 LOCKED 语义）。真机验证：SECUREBITS 0x2f→0x0、
+`SET_KEEPCAPS rc=0` ✓。
+
+**根因②（los99-ksu 修）`MARS-ROOTCAP-FIX`**：KSU `default_root_profile` 是**零初始化 static**，其缓存只靠
+管理器（`CMD_SET_APP_PROFILE`）下发 ⇒ **重启后归零**（allowlist 持久了所以 su 还能用）⇒ `escape_to_root`
+发出**零能力 root**（uid=0 但 CapInh/Prm/Eff/Bnd 全 0）⇒ 一切需要能力的操作全挂：`chmod` 非己文件
+（CAP_FOWNER）、`unshare`（CAP_SYS_ADMIN）⇒ `droidspaces check` 的 PID/Mount/UTS/IPC 四项 ✗、
+三容器起不来、`PR_CAPBSET_DROP` EPERM。现象与 los97 时（管理器刚授权 ⇒ profile 在缓存 ⇒ CapEff=ffff）
+形成完美对照。修法：`escape_to_root` 在 caps memcpy **之前**兜底 `profile->capabilities.effective = ~0ULL`
+（root 就要是全能力；容器场景下管理器 profile 语义无意义）。**注意注入位置必须在 `u64 cap_for_ksud =` 之前**。
+
+**诊断方法备忘**：`cap_task_prctl`（KEEPCAPS）走 `cap_capable` 直查，`cap_prctl_drop`/`unshare`/`chmod`
+走 `ns_capable`→LSM capable 链——两者表现分离时先怀疑能力集本身；`setenforce 0` 后仍 EPERM 可排除 SELinux。
+KSU 内建（`=y`）走正规 `security_add_hooks`（hack 分支仅 `=m` 编译）⇒ LSM 链损坏理论排除。
+
+**状态**：los98-ksu（run 38280200089）已刷入真机：root ✓（su → `u:r:su:s0`）、`CONFIG_KSU=y` ✓、
+securebits 修复实证 ✓；容器验证被根因②挡住 ⇒ los99-ksu（run 待记）修复后重验。
+文档：`docs/FLASH-GUIDE.md` 新增「root 方案选择：APatch vs KernelSU」表 + 三红线；`README.md` 双方案指引。
