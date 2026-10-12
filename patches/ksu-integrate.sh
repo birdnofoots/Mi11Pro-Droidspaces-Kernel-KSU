@@ -38,7 +38,25 @@ s = s.replace(anchor, fix + anchor, 1)
 open(p, 'w').write(s)
 print("MARS-SECUREBITS-FIX injected")
 PYFIX
-grep -n 'MARS-SECUREBITS-FIX\|cred->securebits = 0' KernelSU/kernel/core_hook.c | head -3
+echo "== [KSU] ★MARS 修复2: root profile 能力兜底(必须在 caps memcpy 之前) =="
+python3 - "KernelSU/kernel/core_hook.c" <<'PYFIX2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "\tu64 cap_for_ksud =\n"
+fix = (
+    "\t// MARS-ROOTCAP-FIX(2026-10-13): default_root_profile 是零初始化 static, 其缓存\n"
+    "\t// 只靠管理器(CMD_SET_APP_PROFILE)下发 ⇒ 重启后归零 ⇒ escape_to_root 会发出\n"
+    "\t// 零能力 root(uid=0 但 CapEff/CapBnd 全 0) ⇒ unshare/chmod/容器/droidspaces check 全挂。\n"
+    "\t// root 必须是全能力, 直接兜底(用户态 profile 语义对容器场景无意义)。\n"
+    "\tprofile->capabilities.effective = ~0ULL;\n\n"
+)
+assert s.count(anchor) == 1, "cap_for_ksud anchor not unique!"
+s = s.replace(anchor, fix + anchor, 1)
+open(p, 'w').write(s)
+print("MARS-ROOTCAP-FIX injected")
+PYFIX2
+grep -n 'MARS-SECUREBITS-FIX\|MARS-ROOTCAP-FIX\|cred->securebits = 0\|profile->capabilities.effective = ~0' KernelSU/kernel/core_hook.c | head -5
 echo "== [KSU] 集成核对 =="
 ls drivers/kernelsu/Makefile
 grep -n 'kernelsu' drivers/Makefile drivers/Kconfig
