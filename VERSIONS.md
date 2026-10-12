@@ -1634,3 +1634,12 @@ I2C/AFE 死锁持住 CPU → hh-watchdog 咬口(§J)。los93 的 75/85s 快照(b
   `99-wlan-mars.sh` md5 `6a5d52475c5dfb4149c15ba074780497`(7,656B); 双侧 md5 一致。
 - 生产配方(最终): GOLD JSON + `mi_syms_audio=1` + `patches/cs35l41-build.py`
   (TDM 宏内建 cs35l41 + **cs35l41-i2c.c snd_event 三处打桩** + 不内建 snd_event) + MARS-STOCKNUM。
+
+### O6. 发布与归档(2026-10-12 21:0x)
+- **GitHub Release `los96-audio-final`**: https://github.com/birdnofoots/Mi11Pro-Droidspaces-Kernel-KSU/releases/tag/los96-audio-final
+  资产: boot-Image-los96.img(64,167,936B) / 99-wlan-mars.sh / MD5SUMS / MANIFEST.md / FLASH-GUIDE.md, 全部 uploaded。
+- **git 整理推送**(commit `c6f0724`): README 现状化 + docs/FLASH-GUIDE.md 权威版(刷机注意事项 10 条)
+  + docs/AUDIO-EPIC.md(音频攻坚全过程) + VERSIONS.md/AGENTS.md/实验流水入仓 + 旧 docs-flash-guide.md 改指针去重。
+  本地 gh/ 与远端已硬同步(历史 4 个本地提交内容均被 ghpush 版本超越, 无丢失)。
+- 手机端核对: /data/adb/service.d/99-wlan-mars.sh md5 `6a5d52475c5dfb4149c15ba074780497` = 归档最新版 ✓;
+  WiFi 自动联网 192.168.1.145 ✓。
