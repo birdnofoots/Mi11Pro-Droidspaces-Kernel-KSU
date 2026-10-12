@@ -81,7 +81,7 @@ impl = (
     "}\n"
 )
 assert "SYSCALL_DEFINE3(close_range" not in s, "close_range already present!"
-assert s.rstrip().endswith("}"), "fs/file.c unexpected ending"
+assert s.rstrip().endswith("EXPORT_SYMBOL(iterate_fd);"), "fs/file.c unexpected ending"
 s = s.rstrip() + "\n" + impl
 open(fp, "w").write(s)
 print("fs/file.c: SYSCALL_DEFINE3(close_range) appended")
