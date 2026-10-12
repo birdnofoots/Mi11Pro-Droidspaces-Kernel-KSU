@@ -8868,3 +8868,19 @@ los92 logdump 取证：cs35l41/DSP1 共 694 行，**636 行集中在 50s 的 ~0.
   ② 双 adb 通道(USB+WiFi)并存时裸 `adb` 命令报 more than one device, 刷机前先 `adb disconnect` 多余通道;
   ③ 手机状态栏"电量为零/未充电"开机早期是 UI 误报, 判充电看 `/sys/class/power_supply/battery/status`+healthd。
 - 音频收官验证流程复用: `flash-tag.sh los96` → `los96-verify.sh`(三连蜂鸣) → 用户听音确认。
+
+## §46. ★容器 NAT 攻坚(2026-10-12 22:0x) — 根因=APatch supercall 占 436, 三容器侧修复全通
+- **根因链(全部实证)**: Droidspaces 宿主 NAT 链路完好(手工静态配网即 ping 通 1.1.1.1) ⇒ 断点在容器内 ⇒
+  Ubuntu systemd 249 所有服务 spawn 死于 `close_all_fds()` 的 `close_range(3,-1,0)` 收 EINVAL
+  (fallback 只认 ENOSYS/EPERM/EACCES) ⇒ networkd 不跑 ⇒ 无 DHCP ⇒ "NAT 不通"。
+  **436 号被 APatch 的 KernelPatch supercall 占用**(bmax121/KernelPatch 自带 unistd.h `#define __NR_close_range 436`,
+  无效 key/cmd 回 EINVAL; boot 分区有 "KernelPatch Version" 字符串) ⇒ 与 glibc 2.34+ 的 close_range 编号相撞。
+  ⇒ **不是 NAT/容器的 bug**, 任何现代 systemd/glibc 容器 + APatch root 都中招。
+- **修法**: `patches/nr436-shim.c` 静态包装器替容器 `/sbin/init`(原 init → `/sbin/init.real`):
+  seccomp 把 436 无 0x1158 魔数的调用回 **ENOSYS**(带魔数的 supercall 放行) ⇒ systemd 走 /proc 回退 ⇒ 全活。
+  坑: exec 保留 argv[0](busybox applet 名); 别把 `systemd.unified_cgroup_hierarchy=1` 当程序 exec;
+  勿设 PR_SET_NO_NEW_PRIVS(binfmt_misc 跨架构链)。
+- **验收**: ubuntu=degraded(ssh active, DHCP 172.28.1.2, ping 0% 丢包, DNS 通); alpine=NAT 172.28.195.3
+  (另加 `/sbin/net-up.sh` udhcpc + inittab `::once:`); 手机重启后复验依旧通。用户确认"网络已通"。
+- **遗留**: openwrt(rootfs.img) shim 未装(loop 挂载两次断线, 疑镜像脏 ⇒ 用 `ro,norecovery` 重试);
+  内核级 436 方案无解(kpatch 刷机时覆写), seccomp 适配层即正解。详见 VERSIONS.md §O7。

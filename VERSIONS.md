@@ -1643,3 +1643,41 @@ I2C/AFE 死锁持住 CPU → hh-watchdog 咬口(§J)。los93 的 75/85s 快照(b
   本地 gh/ 与远端已硬同步(历史 4 个本地提交内容均被 ghpush 版本超越, 无丢失)。
 - 手机端核对: /data/adb/service.d/99-wlan-mars.sh md5 `6a5d52475c5dfb4149c15ba074780497` = 归档最新版 ✓;
   WiFi 自动联网 192.168.1.145 ✓。
+
+### O7. ★容器 NAT 攻坚(2026-10-12 22:0x) — 根因: APatch/KernelPatch supercall 占了 436 号系统调用
+- 症状: ubuntu(alpine/openwrt) `net_mode=nat` 全部"网络不通"; ubuntu eth0 永远"awaiting DHCP lease", alpine 无 IP。
+- 逐层实证排除:
+  ① 宿主侧 Droidspaces NAT 链路完好 —— veth `ds-v↔ds-p` + `ds-br0` 172.28.0.1/16 + netlink 注入
+     MASQUERADE `172.28.0.0/16→!172.28.0.0/16` + wlan0 上 `from 172.28.0.0/16 lookup table 1024`;
+  ② 容器内**手工**静态配网(`ip addr add 172.28.1.2/16 dev eth0; ip route add default via 172.28.0.1`)
+     ⇒ ping 1.1.1.1 **0% 丢包** ⇒ NAT 本身是通的, 断点在容器内部;
+  ③ 真断点: Ubuntu 22.04 的 systemd 249 **每个服务 spawn 都死在 FDS 步**
+     (`Failed to close unwanted file descriptors: Invalid argument` ⇒ `Failed at step FDS spawning /bin/sh`)
+     ⇒ systemd-networkd 起不来 ⇒ 无 DHCP ⇒ eth0 永远等租约;
+  ④ 机制: `close_all_fds()` 先调 `close_range(3,-1,0)`(glibc 2.34+ 直发 syscall **436**), 且仅当
+     `ERRNO_IS_NOT_SUPPORTED/PRIVILEGE` 才回退 /proc 扫描 —— **EINVAL 两者都不是 ⇒ 放弃 ⇒ 服务全灭**
+     (GLib #3344 / systemd-devel 2022-03 同款老病, 只是这里病根在内核侧);
+  ⑤ 真凶身份: 436 对**任何参数**(含 `(0,0,0)`)一律 EINVAL; 437+ 全 ENOSYS; 434/435 是真 pidfd_open/clone3;
+     源码树 `d42d2eb6c` 无 close_range、kallsyms 无 `__arm64_sys_close_range`; 而 boot 分区自带
+     `"KernelPatch Version: %x"` 字符串 ⇒ **436 被 APatch 注入的 KernelPatch "supercall" 占用**
+     (bmax121/KernelPatch: `syscall(__NR_supercall, key, ver_and_cmd(key,cmd))`, 其自带 unistd.h 就写着
+     `#define __NR_close_range 436` 拿这个空槽; 无效 key/cmd 回 EINVAL —— 与观测逐字吻合)。
+  ⇒ **不是 Droidspaces 的 NAT bug**: 是 KernelPatch 隐藏系统调用与 glibc close_range 编号相撞,
+    任何现代 systemd/glibc 容器(带 APatch root 的 los96/97)都会中招。
+- **修复(容器侧, 不动内核不动 root)**: `patches/nr436-shim.c` 编静态包装器替换容器 `/sbin/init`
+  (原 init 移存 `/sbin/init.real`, 符号链原样保留): 装 seccomp 过滤器 —— **436 号带 0x1158 supercall
+  魔数放行**(保 APatch IPC), 否则回 **ENOSYS** ⇒ systemd 走 /proc 回退 ⇒ 服务全部复活 ⇒
+  networkd 自动 DHCP ⇒ NAT 全自动通。两个实现坑: ① exec 时 **argv[0] 必须保留原名**(busybox 按
+  argv[0] 选 applet, v1 因此秒退 exit 5); ② droidspaces 给 init 传 `systemd.unified_cgroup_hierarchy=1`
+  这类内核式参数, **不能当程序名 exec**; 另勿设 `PR_SET_NO_NEW_PRIVS`(可能干扰 binfmt_misc 跨架构执行链,
+  本 rootfs 的 systemd 走 qemu binfmt)。
+- 验收(全过): ubuntu `systemctl is-system-running=degraded`(failed 单元 全灭→**1**)、**ssh active**、
+  eth0 **DHCP 自动** `172.28.1.2/16 dynamic`、DNS 1.1.1.1/8.8.8.8、ping 1.1.1.1 与 baidu.com 双 **0% 丢包**;
+  alpine(目录型 rootfs `/data/alpine-rootfs`) 另加 `/sbin/net-up.sh`(udhcpc)+inittab `::once:` + shim
+  ⇒ NAT 模式 `172.28.195.3` + 0% 丢包; **手机重启后复验**(意外真重启): ubuntu run_at_boot 自动起、
+  shim 在 rootfs.img 内持久 ⇒ 重启后 NAT 依旧通, 用户确认"现在ubuntu nat模式，网络已通"。
+- 附: `allow_sandboxing` 0/1 与病因无关(已还原原值=1); 22:40 那次手机重启系安卓框架软重启
+  (bootreason=reboot、pstore 空无内核崩溃、dropbox `system_server_wtf` 22:37-22:38), 内核身份/槽位完好。
+- **遗留**: openwrt(rootfs.img)的 shim 未装(两次 loop 挂载均在挂载瞬间断线, 与手机软重启重合,
+  疑镜像脏/挂载不稳 ⇒ 下次用 `mount -o loop,ro,norecovery` + 超时保护重试);
+  内核级方案(los97 把 436 改 ENOSYS/补真 close_range)**无解**——kpatch 在刷机时覆写表项, 用户态 seccomp 适配层即正解。
