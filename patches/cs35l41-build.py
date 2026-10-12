@@ -175,17 +175,47 @@ def _patch_lahaina_conf(path):
         r'^export CONFIG_SND_SOC_CS35L41=.*$',
         'export CONFIG_SND_SOC_CS35L41=y  # %s' % MARK,
         src, count=1, flags=re.M)
-    src2, n2 = re.subn(
-        r'^export CONFIG_SND_EVENT=.*$',
-        'export CONFIG_SND_EVENT=y  # %s' % MARK,
-        src2, count=1, flags=re.M)
+    # SND_EVENT 保持原样(=m): los95 教训 —— 绝不内建 snd_event(见 patch())
     if n1 != 1 and 'CONFIG_SND_SOC_CS35L41' not in src2:
         src2 += '\nexport CONFIG_SND_SOC_CS35L41=y  # %s\n' % MARK
-    if n2 != 1 and 'CONFIG_SND_EVENT' not in src2:
-        src2 += '\nexport CONFIG_SND_EVENT=y  # %s\n' % MARK
     with open(path, 'w', encoding='utf-8') as f:
         f.write(src2)
-    return 'lahainaauto.conf: CS35L41=y + SND_EVENT=y'
+    return 'lahainaauto.conf: CS35L41=y (SND_EVENT 保持 =m)'
+
+
+def _patch_cs35l41_i2c(root):
+    """cs35l41-i2c.c 打桩 snd_event 调用(los96 关键): 
+    内建 cs35l41 原本硬链 snd_event_client_register ⇒ 被迫连带内建 snd_event ⇒
+    原厂 snd_event_dlkm 装载败 ⇒ apr(q6_notifier,snd_event)→q6→platform→machine
+    依赖链雪崩 ⇒ 无声卡(los95 实测)。打桩后 cs35l41 内建零 snd_event 引用 ⇒
+    原厂 snd_event_dlkm 正常装载 ⇒ 链完整 ⇒ machine 装卡并按名绑定我们的 TDM 安全驱动。
+    代价: 失去 PA SSR(子系统重启)恢复 —— 无 SSR 场景可接受。"""
+    path = os.path.join(root, 'techpack/audio/asoc/codecs/cs35l41/cs35l41-i2c.c')
+    if not os.path.isfile(path):
+        raise RuntimeError('缺少 ' + path)
+    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+        src = f.read()
+    if MARK in src:
+        return 'cs35l41-i2c.c: already patched'
+    subs = [
+        ('rc = snd_event_client_register(cs35l41->dev, &cs35l41_ssr_ops, NULL);',
+         'rc = 0;  /* %s snd_event 桩(SSR 恢复弃用) */' % MARK),
+        ('snd_event_notify(cs35l41->dev, SND_EVENT_UP);',
+         '/* %s snd_event 桩 */ (void)0;' % MARK),
+        ('snd_event_client_deregister(cs35l41->dev);',
+         '/* %s snd_event 桩 */ (void)0;' % MARK),
+    ]
+    n = 0
+    for old, new in subs:
+        if old in src:
+            src = src.replace(old, new, 1)
+            n += 1
+        else:
+            raise RuntimeError('cs35l41-i2c.c: 未命中桩点: ' + old[:50])
+    with open(path, 'w', encoding='utf-8', errors='replace') as f:
+        f.write(src)
+    return 'cs35l41-i2c.c: snd_event 3 处桩完成'
+
 
 
 def patch(root):
@@ -200,10 +230,14 @@ def patch(root):
         raise RuntimeError('缺少 ' + p)
     msgs.append(_patch_cs35l41_kbuild(p))
 
-    p = os.path.join(root, 'techpack/audio/soc/Kbuild')
-    if not os.path.isfile(p):
-        raise RuntimeError('缺少 ' + p)
-    msgs.append(_patch_snd_event_kbuild(p))
+    p = os.path.join(root, 'techpack/audio/asoc/codecs/cs35l41')
+    msgs.append(_patch_cs35l41_i2c(root))
+
+    # ★los95 血泪(2026-10-12): 绝不内建 snd_event!
+    # 原厂 machine_dlkm/apr_dlkm 的 modinfo depends=snd_event_dlkm(按模块名解析);
+    # 内建占名 ⇒ 原厂 snd_event_dlkm 装载败 ⇒ apr→q6→native→platform→machine 依赖链雪崩
+    # ⇒ 机器驱动不注册 ⇒ 无声卡(los95 实测)。cs35l41 内建无此问题(无人依赖 cs35l41_dlkm,
+    # 功放是 ASoC 动态按名绑定 "cs35l41.1-0040"/"1-0042")。⇒ soc/Kbuild 不动, snd_event 用原厂。
 
     p = os.path.join(root, 'techpack/audio/config/lahainaauto.conf')
     if not os.path.isfile(p):
