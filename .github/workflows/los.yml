@@ -74,6 +74,10 @@ on:
         description: '1=额外注入音频桩 is_early_cons_enabled(原厂 mbhc_dlkm 必需 ⇒ 有声卡); 二分定位时可关'
         required: false
         default: '0'
+      ksu:
+        description: '1=整合 KernelSU v0.9.5(root 方案 B; 非GKI 5.4 唯一正路, 需 KPROBES — 容器 NAT 不需要 nr436-shim)'
+        required: false
+        default: '0'
       firmware_embed:
         description: '1=把 firmware/ 里的固件编进内核(EXTRA_FIRMWARE) ⇒ 内建驱动不再等 60s 用户态固件回退(实测能把开机从 4 分钟压到 ~40s)'
         required: false
@@ -265,6 +269,22 @@ jobs:
           fi
           echo "=== 关键 config ==="
           grep -E "^CONFIG_(PID_NS|IPC_NS|USER_NS|SYSVIPC|POSIX_MQUEUE|DEVTMPFS|CGROUPS|CGROUP_DEVICE|MODVERSIONS|LOCALVERSION|CFI_CLANG|LTO_CLANG|THINLTO)" out/.config || true
+
+      - name: "★KernelSU v0.9.5 整合(仅 ksu=1; root 方案 B)"
+        if: github.event.inputs.ksu == '1'
+        # 非 GKI(5.4) 上最新 KSU 的 boot patch 无效 ⇒ 必须 v0.9.5 源码整合(kprobe 法)。
+        # 详见 patches/ksu-integrate.sh 头注与 docs/FLASH-GUIDE.md"root 方案选择"。
+        run: |
+          set -euo pipefail
+          bash "$GITHUB_WORKSPACE/patches/ksu-integrate.sh" "$PWD/kernel"
+          cd kernel
+          ./scripts/config --file out/.config -e KSU -e KPROBE_EVENTS
+          make -s O=out ARCH=arm64 CC=clang LD=ld.lld olddefconfig
+          grep -q '^CONFIG_KSU=y' out/.config || { echo '::error::CONFIG_KSU 未生效'; exit 1; }
+          grep -q '^CONFIG_KPROBE_EVENTS=y' out/.config || echo '::warning::KPROBE_EVENTS 未生效(不影响 kprobe 核心)'
+          grep -q '^CONFIG_KPROBES=y' out/.config || { echo '::error::CONFIG_KPROBES 不是 y(KSU 将无 root)'; exit 1; }
+          echo "--- KSU 版本/形态核对 ---"
+          grep -rn 'KSU_VERSION\|kernelsu_init' drivers/kernelsu/ksu.c | head -3
 
       - name: 补 cnss_prealloc 新 API(原厂 qcacld 需要 wcnss_skb_prealloc_get/put 等)
         if: github.event.inputs.cld_ref != ''
