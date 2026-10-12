@@ -472,11 +472,23 @@ jobs:
           python3 "$GITHUB_WORKSPACE/patches/asoc-pcm-stockmap.py" "$PWD/kernel"
           grep -c 'MARS-STOCKNUM' "$PWD/kernel/sound/soc/soc-core.c"
 
-      - name: "★同源 cs35l41 — 已停用(2026-10-12: 刷屏真凶系误读, los90 硬挂头号嫌疑)"
-        # DSP 刷屏不存在(los86 ld.bin 仅 1300 行正常装载); 卡死另有其因(编号垃圾)。
-        # 内建 cs35l41/snd_event 反而引入 los90 硬挂风险 ⇒ 停用, 用原厂 cs35l41_dlkm。
+      - name: "★同源 cs35l41 — 抢占原厂功放驱动(2026-10-12 §O2: TERT 功放上电秒死真凶)"
+        # 71-72 轮实锤: TERT_TDM_RX_0(扬声器) PCM 打开瞬间 <0.5s 硬复位(静音波形同死, 与幅度无关)
+        # ⇒ 死在功放上电序列。原厂 cs35l41_dlkm(5.4.233) 在我们 5.4.242 内核上 struct 读垃圾
+        # (be_pcm_base=-34 实锤) + 缺 CONFIG_TARGET_PRODUCT_CS35L41_TDM 时按 I2S 初始化"跑飞"
+        # (cs35l41-build.py 文档定论)。树里源码齐全但被 TARGET_PRODUCT 门关住
+        # ⇒ 本步拆门 + 加 mars/star TDM 编译宏 + 内建(=y), 原厂模块 duplicate 被拒自然抢占。
+        # 注: los90 硬挂归因存疑(发生在 MARS-STOCKNUM 之前撞号/半残时代) ⇒ los95=STOCKNUM+同源 首次合体。
         run: |
-          echo "cs35l41 同源内建已停用(真凶=PCM 编号垃圾, 见 MARS-STOCKNUM 步骤)"
+          set -e
+          python3 "$GITHUB_WORKSPACE/patches/cs35l41-build.py" "$PWD/kernel"
+          echo "--- 核对补丁落点 ---"
+          grep -n 'MARS-CS35L41-BUILD\|obj-y.*cs35l41' \
+            "$PWD/kernel/techpack/audio/asoc/codecs/Kbuild" || true
+          grep -n 'MARS-CS35L41-BUILD\|TARGET_PRODUCT_CS35L41_TDM' \
+            "$PWD/kernel/techpack/audio/asoc/codecs/cs35l41/Kbuild" || true
+          grep -n 'CS35L41\|SND_EVENT' \
+            "$PWD/kernel/techpack/audio/config/lahainaauto.conf" || true
 
       - name: 编译 Image
         run: |
@@ -508,9 +520,34 @@ jobs:
           fi
           echo "build.log 无 error: ✓"
 
-      - name: "验收 cs35l41 已编入 Image — 已停用(见上)"
+      - name: "验收 cs35l41 已编入 Image(同源功放驱动闸门)"
+        # §O2: 功放上电秒死的修复必须真进产物, 否则刷了等于没修
+        # (编译缓存/门没生效都可能静默漏掉 ⇒ run110 Kbuild 注释教训)。
         run: |
-          echo "闸门已停用: cs35l41 不再内建(用原厂 DLKM, 真机实证 DSP 装载正常)"
+          set -e
+          IMG=kernel/out/arch/arm64/boot/Image
+          MAP=kernel/out/System.map
+          echo "--- Image 里的 cs35l41 痕迹 ---"
+          N=$(strings -a "$IMG" | grep -ci cs35l41 || true)
+          echo "strings Image | grep -ci cs35l41 = $N"
+          if [ -f "$MAP" ]; then
+            echo "--- System.map 里的 cs35l41 符号 ---"
+            grep -c 'cs35l41' "$MAP" || true
+            grep 'cs35l41' "$MAP" | head -8 || true
+          else
+            echo "(无 System.map, 用 nm 看 vmlinux)"
+            nm kernel/out/vmlinux 2>/dev/null | grep -c cs35l41 || true
+          fi
+          if [ "$N" -eq 0 ]; then
+            echo "::error::Image 里没有任何 cs35l41 痕迹 ⇒ 补丁没生效或没编进去, 拒绝上传假产物"
+            echo "--- 回看补丁落点 ---"
+            grep -n 'cs35l41\|CS35L41' kernel/techpack/audio/asoc/codecs/Kbuild || true
+            grep -n 'CS35L41\|SND_EVENT' kernel/techpack/audio/config/lahainaauto.conf || true
+            echo "--- build.log 里 cs35l41 相关 ---"
+            grep -a 'cs35l41' "$GITHUB_WORKSPACE/build.log" | head -20 || true
+            exit 1
+          fi
+          echo "cs35l41 已编入 Image ✓ ($N 处痕迹)"
 
       - name: 编译内核模块并打包(可选)
         if: github.event.inputs.modules == '1'
