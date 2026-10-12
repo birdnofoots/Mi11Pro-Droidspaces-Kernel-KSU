@@ -108,6 +108,21 @@ python3 /tmp/ghdisp2.py los.yml '{"config":"mars_factory.config","logdump":"1","
 **一律 `fastboot flash boot_a <img>`**（活动槽 `_a`；`fastboot boot` 在本机不可用）。
 完整步骤、注意事项、救机、验收见 [`docs/FLASH-GUIDE.md`](docs/FLASH-GUIDE.md)。
 
+## 🧩 ★新装容器必做：`nr436-shim`（NAT 联网的钥匙）
+
+> **每新装/新导入一个容器 rootfs，都要装一次 `nr436-shim`**，否则现代 systemd/glibc 发行版
+> (Ubuntu/Debian/…) 的服务全部起不来 ⇒ 没 DHCP ⇒ "NAT 模式网络不通"。
+>
+> ```bash
+> adb push nr436-shim /sdcard/ && adb push patches/nr436-shim-install.sh /sdcard/
+> adb shell 'su -c sh /sdcard/nr436-shim-install.sh <容器名>'    # 一键, 幂等, 可重复跑
+> ```
+>
+> 根因(一句话)：APatch 的 KernelPatch 隐藏系统调用 supercall 占了 **436 号**，与 glibc 的
+> `close_range` 编号相撞，systemd 收 EINVAL 不回退导致服务全灭。shim 用 seccomp 把 436 改道
+> 成 ENOSYS(保留 supercall 魔数调用) ⇒ systemd 走 /proc 回退 ⇒ 全活 ⇒ NAT 自动通。
+> **完整清单/失败救援/卸载/源码见 [docs/CONTAINER-NET.md](docs/CONTAINER-NET.md)**。
+
 ## 目录
 
 ```
