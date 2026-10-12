@@ -106,6 +106,14 @@ on:
         description: '分析用: 1=保留 MODVERSIONS=y(生成真实 CRC, 用于与原厂模块比对; 该 Image 不可刷)'
         required: false
         default: '0'
+      cs35l41:
+        description: '1=同源 cs35l41 内建+TDM/STAR 编译宏(los95 起默认开, 修功放上电秒死)'
+        required: false
+        default: '1'
+      tert_mask:
+        description: '1=屏蔽 TERT_TDM_RX 扬声器链路(los96 备选: 播放快速失败, 防功放上电硬死)'
+        required: false
+        default: '0'
 
 jobs:
   build:
@@ -473,6 +481,7 @@ jobs:
           grep -c 'MARS-STOCKNUM' "$PWD/kernel/sound/soc/soc-core.c"
 
       - name: "★同源 cs35l41 — 抢占原厂功放驱动(2026-10-12 §O2: TERT 功放上电秒死真凶)"
+        if: github.event.inputs.cs35l41 != '0'
         # 71-72 轮实锤: TERT_TDM_RX_0(扬声器) PCM 打开瞬间 <0.5s 硬复位(静音波形同死, 与幅度无关)
         # ⇒ 死在功放上电序列。原厂 cs35l41_dlkm(5.4.233) 在我们 5.4.242 内核上 struct 读垃圾
         # (be_pcm_base=-34 实锤) + 缺 CONFIG_TARGET_PRODUCT_CS35L41_TDM 时按 I2S 初始化"跑飞"
@@ -489,6 +498,15 @@ jobs:
             "$PWD/kernel/techpack/audio/asoc/codecs/cs35l41/Kbuild" || true
           grep -n 'CS35L41\|SND_EVENT' \
             "$PWD/kernel/techpack/audio/config/lahainaauto.conf" || true
+
+      - name: "☆TERT 扬声器链路屏蔽(los96 备选, 仅 tert_mask=1)"
+        # §O2 保底: TERT_TDM_RX_0/1 dpcm_playback 1->0 ⇒ 播放快速失败(干净瞬时),
+        # 功放永不上电 ⇒ 不再硬死; 音频栈照常 ⇒ system_server/FUSE 健康可日用。
+        if: github.event.inputs.tert_mask == '1'
+        run: |
+          set -e
+          python3 "$GITHUB_WORKSPACE/patches/audio-tert-mask.py" "$PWD/kernel"
+          grep -c 'MARS-tert-mask' "$PWD/kernel/techpack/audio/asoc/lahaina.c"
 
       - name: 编译 Image
         run: |
@@ -521,6 +539,7 @@ jobs:
           echo "build.log 无 error: ✓"
 
       - name: "验收 cs35l41 已编入 Image(同源功放驱动闸门)"
+        if: github.event.inputs.cs35l41 != '0'
         # §O2: 功放上电秒死的修复必须真进产物, 否则刷了等于没修
         # (编译缓存/门没生效都可能静默漏掉 ⇒ run110 Kbuild 注释教训)。
         run: |
