@@ -15,7 +15,7 @@
 |---|---|---|
 | root 原理 | 刷机时 `boot_patch` 注入 KernelPatch → `apd`/supercall(nr 436) | 内核源码整合 `drivers/kernelsu`（kprobe + LSM 钩子，prctl IPC） |
 | **syscall 436** | **被 supercall 加塞占用**（glibc `close_range` 撞号 ⇒ systemd 服务孵化失败） | 本树原生撞号（QGKI 把 `process_madvise` 抢占 436，glibc `close_range` 收 EINVAL 不回退 ⇒ 同样孵化失败）；**由 `MARS-CLOSE-RANGE-436` 内核补丁根治**（436 还给 `close_range` 真实现）⇒ 容器无需 shim |
-| **容器 NAT** | **每容器必须装 `nr436-shim`**（见下节） | **不需要任何 shim**（靠 `MARS-CLOSE-RANGE-436`，los100-ksu 起） |
+| **容器 NAT** | **每容器必须装 `nr436-shim`**（见下节） | **不需要任何 shim**（靠 `MARS-CLOSE-RANGE-436`，los100-ksu 起 ✅ 已实证三容器 NAT 全通） |
 | 镜像 | 净版 + APatch App/flash-local.sh **打补丁后**再刷 | **净版直接刷，绝不能打 APatch 补丁** |
 | root 管理 | APatch App（`me.bmax.apatch`） | KernelSU 管理器 **v0.9.5**（`me.weishu.kernelsu`，装同版本避免版本错配） |
 | 开机脚本 | `/data/adb/service.d/`（apd 执行） | `/data/adb/service.d/`（ksud 执行，路径不变） |

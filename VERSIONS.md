@@ -1731,3 +1731,24 @@ sys_ni_syscall 显式 ENOSYS 防表项 NULL 空洞、440→process_madvise 还�
 从此可用），`fs/file.c` 追加最小正确的 `SYSCALL_DEFINE3(close_range,...)`。
 诊断备忘：**202/FDS = systemd exec spawn 失败码**，看到它先查 syscall 436 返回值（`syscall(436,0,~0u,0)`
 该是 ENOSYS/range-EINVAL 而非"像个真 syscall 的 EINVAL"）。
+
+### ✅ 收尾㉓ 终验（los100-ksu, run 38306315241, 2026-10-13 05:0x 全绿）
+
+刷写：裸刷净版（不打 APatch 补丁）`boot-Image-los100-ksu.img` md5 `26556b80f33fa9300c853689d77dfc00` → `boot_a`（活动槽 `_a`）。
+身份 `#25 SMP PREEMPT Mon Oct 12 20:58:37 UTC 2026`（runner@ 自编）。
+
+| 验收项 | 结果 | 证据 |
+|---|---|---|
+| KSU root（su → `u:r:su:s0`，管理器授权 Shell） | ✅ | [adb] |
+| `CONFIG_KSU=y`/`CONFIG_KPROBES=y` | ✅ | [adb] |
+| MARS-SECUREBITS-FIX：SECUREBITS 0x2f→0x0、KEEPCAPS rc=0 | ✅ | [adb] |
+| MARS-ROOTCAP-FIX：CapEff/CapBnd=ffffffffffffffff | ✅ | [adb] |
+| MARS-CLOSE-RANGE-436：close_range 语义（关得掉 probe fd、fd>max_fd/未知flags→EINVAL） | ✅ | [adb] |
+| `droidspaces check` 28/28 | ✅ | [adb] |
+| **三容器 NAT 无 shim**：ubuntu **172.28.1.2(DHCP)**/alpine 172.28.1.3/openwrt 172.28.1.1，全部 ping 1.1.1.1 + baidu.com 通 | ✅ | [adb] |
+| WiFi/开机脚本（ksud 执行 service.d）正常 | ✅ | [adb] |
+
+root 方案可选（APatch vs KSU）已写入 `docs/FLASH-GUIDE.md`（对照表+方案A/B步骤+红线）与 `README.md`。
+结论差异一句话：**APatch 的 supercall 加塞 436 ⇒ 容器必须 nr436-shim；KSU 内核由 MARS-CLOSE-RANGE-436
+把 436 还给 close_range 真实现 ⇒ 容器无需 shim**（nr436-shim 在 APatch 方案下仍有效可用）。
+新链路备忘：mars 改走一加 USB 直连/WiFi `192.168.43.246:5555`（原 192.168.1.x/149 链路随出门作废）。
