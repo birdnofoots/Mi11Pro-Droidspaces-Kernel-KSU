@@ -154,6 +154,15 @@
 #define LOGDUMP_SNAP2_MS	55000
 #define LOGDUMP_SF_CRASH_LIMIT	3
 #define LOGDUMP_SF_CRASH_UPTIME	45000
+/*
+ * ★ 2026-10-12 复盘(los92):55s 之后再无任何落盘,而干净重启发生在 ~75-95s
+ *   ⇒ 死因(重启前最后几秒)永远看不见。加 75s/85s 两档"死亡窗口快照"
+ *   (56MB / 59MB 偏移,分区尾部空闲区,刷回原厂不覆盖)。
+ */
+#define LOGDUMP_LATE1_MS	75000
+#define LOGDUMP_LATE1_OFFSET	(56ULL * 1024 * 1024)
+#define LOGDUMP_LATE2_MS	85000
+#define LOGDUMP_LATE2_OFFSET	(59ULL * 1024 * 1024)
 
 #define LOGDUMP_MAGIC		"KLOGDMP4"
 #define LOGDUMP_STAT_MAGIC	"KLOGSTT4"
@@ -219,6 +228,9 @@ static bool			 logdump_early3_done;	/* 8s 快照 */
 static bool			 logdump_early4_done;	/* 20s 快照 */
 static bool			 logdump_early5_done;	/* 30s 快照 */
 static bool			 logdump_snap2_done;	/* 55s 现场快照已写 */
+static bool			 logdump_late1_done;	/* 75s 死亡窗口快照已写 */
+static bool			 logdump_late2_done;	/* 85s 死亡窗口快照已写 */
+static bool			 logdump_rescue_ckpt;	/* 90s 自救检查点已打点 */
 static bool			 logdump_statedump_done;	/* v4.10:任务转储只做一次 */
 /* v4.10 诊断:由 kernel/module.c 追加的调试钩子 */
 extern struct task_struct	*moddbg_mutex_owner(void);
@@ -672,6 +684,24 @@ static int logdump_write_log(char *buf, size_t text_off, size_t len, u32 seq,
 			pr_emerg("logdump: 已在 %llums 写入现场快照(32MB 偏移)\n",
 				 (unsigned long long)logdump_uptime_ms());
 	}
+	/* ★ 死亡窗口快照(2026-10-12 los92 复盘):干净重启前最后几秒(55~95s)无任何落盘。
+	 *   75s/85s 两档把"重启前最后一口气"钉进分区(56MB/59MB)。 */
+	if (!logdump_late1_done && logdump_uptime_ms() >= LOGDUMP_LATE1_MS) {
+		logdump_late1_done = true;
+		if (logdump_write(LOGDUMP_LATE1_OFFSET, h, total))
+			pr_err("75s 快照写入失败\n");
+		else
+			pr_emerg("logdump: 已在 %llums 写入 75s 快照(56MB 偏移)\n",
+				 (unsigned long long)logdump_uptime_ms());
+	}
+	if (!logdump_late2_done && logdump_uptime_ms() >= LOGDUMP_LATE2_MS) {
+		logdump_late2_done = true;
+		if (logdump_write(LOGDUMP_LATE2_OFFSET, h, total))
+			pr_err("85s 快照写入失败\n");
+		else
+			pr_emerg("logdump: 已在 %llums 写入 85s 快照(59MB 偏移)\n",
+				 (unsigned long long)logdump_uptime_ms());
+	}
 	if (ret) {
 		pr_err("写日志失败 seq=%u len=%zu src=%u ret=%d\n",
 		       seq, len, source, ret);
@@ -843,10 +873,12 @@ static void logdump_check_stuck(void)
 #define LOGDUMP_GOLDEN_PATH	"/data/local/tmp/mars-golden-boot.img"
 #define LOGDUMP_BOOT_DEV	"/dev/block/by-name/boot_a"
 
-static bool logdump_rescue_slot = true;	/* 名字保留,语义已改为"回刷当前槽" */
+static bool logdump_rescue_slot = false;	/* ★ 2026-10-12 用户指令:内核不得自主刷机/重启,
+						 *   默认关;需要自救实验时 cmdline
+						 *   logdump.logdump_rescue_slot=1 显式打开 */
 module_param(logdump_rescue_slot, bool, 0644);
 MODULE_PARM_DESC(logdump_rescue_slot,
-	"没有 USB 枚举时用 golden 镜像回刷当前 boot 槽并重启(自编内核自救)");
+	"没有 USB 枚举时用 golden 镜像回刷当前 boot 槽并重启(默认关,2026-10-12 起)");
 
 static bool logdump_rescue_done;
 /*
@@ -984,6 +1016,15 @@ static void logdump_once(void)
 		logdump_usb_seen = true;
 		pr_emerg("logdump-rescue: 已看到 USB 枚举痕迹(uptime=%llums),自救不触发\n",
 			 logdump_uptime_ms());
+	}
+	/* ★ 2026-10-12:90s 检查点无条件打点(无论自救开关)——把"这一刻的状态"钉进
+	 *   日志环,供 75s/85s/后续快照对时与判断自救是否本可触发。 */
+	if (!logdump_rescue_ckpt && logdump_uptime_ms() >= LOGDUMP_RESCUE_MS) {
+		logdump_rescue_ckpt = true;
+		pr_emerg("logdump-rescue: %llums 检查点:rescue_slot=%d usb_seen=%d done=%d"
+			 "(自救默认关,仅取证)\n",
+			 logdump_uptime_ms(), (int)logdump_rescue_slot,
+			 (int)logdump_usb_seen, (int)logdump_rescue_done);
 	}
 	if (logdump_rescue_slot && !logdump_rescue_done && !logdump_usb_seen &&
 	    logdump_uptime_ms() >= LOGDUMP_RESCUE_MS) {
