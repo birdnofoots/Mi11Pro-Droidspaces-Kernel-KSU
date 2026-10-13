@@ -70,6 +70,16 @@ cat /sdcard/dsh-url.txt         # 容器内 loopback 形式
 - **整机重启自愈**：容器自动拉起、dsh-web/nginx active、DNAT 规则自动装、LAN URL 自动更新 ✓
 - 重启后旧浏览器 cookie 仍 200（签发密钥随 `.credentials.yaml` 持久化）✓
 
+## ⚠️ 坑：GUI 预设插件的软链（2026-10-13 容器重启后 dsh 起不来的教训）
+
+GUI 里启用的预设插件（如 `dsh-session-search`）会把源码生成到 **`/root/mars/work/dsh-*`**，
+但**不会自动建软链**到 `/root/.dsh/profiles/web/node_modules/` ⇒ 冷启动 loader 直接崩
+（`ERR_MODULE_NOT_FOUND: Cannot find package 'dsh-session-search'`），表现就是重启后 dsh 没起来、
+`/var/log/dsh-web.log` 空（tee 被崩溃卷走，真正错误在 `journalctl -u dsh-web`）。
+**已根治**：wrapper 启动前自动把 `/root/mars/work/dsh-*` 全部补链（`dsh-web.sh` 内「自动补链」段）。
+手动修法：`ln -sfn ../../../../mars/work/<插件名> /root/.dsh/profiles/web/node_modules/<插件名>` 再 `systemctl restart dsh-web`。
+插件源码备份：`work/dsh-session-search-plugin.tgz`（含 `dsh-session-search/`）。
+
 ## 已知事项
 
 - 一加工作区 `dsh_nginx_auth.txt` 便签里的密码已过期（本机 nginx 也 401）；mars 实例按便签密码重置为
