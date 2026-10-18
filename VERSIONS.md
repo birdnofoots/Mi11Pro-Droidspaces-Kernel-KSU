@@ -4,6 +4,9 @@
 
 > **权威文档**。每刷一个镜像加一行。证据等级：`[目]` 目视 / `[log]` logdump / `[adb]` / `[?]` 推断。
 
+> 🟢 **最新默认基线（2026-10-19）：`los101-apatch-bbr` —— APatch + BBR。**
+> 基于 los96（APatch 最后成功版）+ BBR；KernelSU v0.9.5 线转为历史/可选。详见文末 **§los101**。
+
 ---
 
 ## ★★★★ 2026-10-04 P1 里程碑：**首次进入 MIUI**（后续一切工作的基线）
@@ -1754,3 +1757,87 @@ root 方案可选（APatch vs KSU）已写入 `docs/FLASH-GUIDE.md`（对照表+
 新链路备忘：mars 改走一加 USB 直连/WiFi `192.168.43.246:5555`（原 192.168.1.x/149 链路随出门作废）。
 USB 直连排障：容器里 `lsusb` 能见 mars（`2717:ff48`）但 adb 扫不到 = 缺 `/dev/bus/usb` 节点 ⇒
 `scripts/usb-link-setup.sh` 自动 mknod(major 189, minor=(bus-1)*128+dev-1) + 重启 adb server 即通。
+
+---
+
+## ★★★★★★ 2026-10-19 **los101-apatch-bbr：APatch 基线回归 + BBR 默认开启（新默认基线）**
+
+**决策（用户）**：KSU 线受非 GKI 限制只能停在 **v0.9.5**，版本太低；切回 **APatch**。
+**基线选择**：用 APatch 最后成功版 **los96**（run `38245465726`，commit `ab81bdb`，release `los96-audio-final`），
+不引入 KSU 期改动；只加 BBR 开关。
+
+**先确认 los96 的 BBR 是关的**（从 los96 artifact 的 Image 内嵌 IKCONFIG 提取，非猜测）：
+```text
+# CONFIG_TCP_CONG_ADVANCED is not set
+CONFIG_TCP_CONG_CUBIC=y
+CONFIG_DEFAULT_TCP_CONG="cubic"
+# CONFIG_NET_SCH_FQ is not set
+```
+
+**实现**：
+- 分支 `apatch-bbr`（从 `ab81bdb` 拉出），commit `00e47cb`：`los.yml` 新增
+  `★BBR 拥塞控制(仅 extra_config 含 BBR)` 步骤；los96 其它配方**一项未动**。
+- 步骤内容：`-e TCP_CONG_ADVANCED -e TCP_CONG_CUBIC -e TCP_CONG_BBR -e NET_SCH_FQ
+  -e DEFAULT_BBR -d DEFAULT_CUBIC` → `olddefconfig` → 断言 `TCP_CONG_BBR/DEFAULT_BBR/NET_SCH_FQ/DEFAULT_TCP_CONG="bbr"`。
+- `workflow_dispatch` 输入已达 25 上限 ⇒ BBR 用 `extra_config` 末尾的 **`BBR` 标记**门控。
+- 构建：GOLD JSON + `mi_syms_audio=1` + `extra_config ...,BBR`；`los_commit=d42d2eb6c`；**无 KSU 标记**。
+- CI：**run `39174084270` success**；artifact `los-kernel-126`
+  （126 是 GitHub run_number；版本号按项目 los 序列为 **101**）。
+  https://github.com/birdnofoots/Mi11Pro-Droidspaces-Kernel-KSU/actions/runs/39174084270
+- CI 内 BBR 断言实测（日志原文）：
+  ```text
+  CONFIG_TCP_CONG_ADVANCED=y
+  CONFIG_TCP_CONG_CUBIC=y
+  CONFIG_TCP_CONG_BBR=y
+  CONFIG_DEFAULT_BBR=y
+  CONFIG_DEFAULT_TCP_CONG="bbr"
+  CONFIG_NET_SCH_FQ=y
+  ```
+
+**产物**：
+
+| 文件 | md5 | 大小/说明 |
+|---|---|---|
+| `Image-los101-apatch-bbr` | `b10a6a1c0cf365aef30fcfc90a612593` | 43,809,280 B 裸 Image |
+| `boot-Image-los101-apatch-bbr.img` | `f0c43b9970adee2a63ccf9b3c9d70142` | 64,167,936 B **净版** boot（Release 公开资产） |
+| `boot-Image-los101-apatch-bbr-APatch.img` | `a43083b52c393e6330dc9b6dda6a2b5f` | 64,360,448 B 已打 APatch（个人 superkey；**本地保留，不公开上传**） |
+| `los101-modules.tgz` | `681a0da93209838e0f3526be0a5966e9` | 4,122,125 B 内核模块包 |
+| `config-last.gz` | `b50150be41320eefe3fdb53a05d3c898` | 内嵌 config（BBR=y/默认 bbr） |
+| `System.map` | `d76ab8263bbf5f9ff0a9f05280a75872` | 本次构建 |
+| `99-wlan-mars.sh` | `6a5d52475c5dfb4149c15ba074780497` | 开机 WLAN 脚本（los96 同款） |
+
+- 净版 boot 的打包方式与 los96 完全一致：`ref/boot-header.bin` + `boot-ramdisk-norec.gz`（20,352,914 B）+ 新 Image
+  → 用 `tools/make-bootimg.py`；已用 los96 回放验证（重打包 md5 与 release `a18c89f2…` 逐字节一致）。
+- `strings Image | grep -c KernelSU` = **0**；`CONFIG_KSU` 不存在 ⇒ 真 APatch 内核，无 KSU 双钩子。
+
+**真机验收（dd 刷 `boot_a`，重启后）**：
+
+| 项 | 结果 | 证据 |
+|---|---|---|
+| 内核身份 | `#26 SMP PREEMPT Sun Oct 18 23:04:07 UTC 2026`（`runner@`） | [adb] |
+| BBR config | `TCP_CONG_ADVANCED=y`、`TCP_CONG_BBR=y`、`DEFAULT_TCP_CONG="bbr"`、`NET_SCH_FQ=y` | [adb] `/proc/config.gz` |
+| BBR 运行时 | `tcp_congestion_control=bbr`；available `reno bbr cubic`；allowed `reno bbr` | [adb] |
+| APatch root | `uid=0`、`context=u:r:magisk:s0`、`apd` 运行、boot_a 有 KernelPatch 串 | [adb] |
+| KSU 缺席 | 无 `CONFIG_KSU`；`strings boot_a \| grep -c KernelSU` = 0 | [adb] |
+| WiFi | `wlan0 192.168.43.246/24` UP | [adb] |
+| 音频 | `/proc/asound/cards` = `lahaina-mtp-snd-card` | [adb] |
+| 容器能力 | `droidspaces check`：All required features found | [adb] |
+| 槽位/开机 | `slot=_a`、`boot_completed=1` | [adb] |
+
+**新基线规则（以后按这个来）**：
+1. **默认 root = APatch**，内核不带 KSU；KSU v0.9.5 仅历史/可选，不再作为默认线。
+2. 新构建要 BBR：`extra_config` 末尾加 **`BBR`**；不加 = los96 原样（BBR 关）。
+3. 要复现 los101：分支/tag **`los101-apatch-bbr`** + `los_commit=d42d2eb6c` + 上面的 GOLD JSON（无 `KSU`）。
+
+**注意/坑**：
+- 本内核是 los96 基线，**没有** `MARS-CLOSE-RANGE-436` 内核补丁；APatch 的 KernelPatch supercall 仍占 436
+  ⇒ 容器 NAT 仍按原方案装 **`nr436-shim`**（已装过的不用重装）。
+- `NET_SCH_FQ=y` 已编进内核，但 `wlan0` 当前 qdisc 是 `mq/pfifo_fast`（Android 原生多队列）；BBR 已生效，
+  若要 fq pacing 再单独调 `tc qdisc`，不是 BBR 生效的前提。
+- 回退：刷前 KSU 版完整 boot 备份 md5 `a0ae428e60cdcd1054347b6eaa2e78ea`（本地
+  `work/backups/boot_a-los100-ksu-backup-20261019.img`）；原厂+APatch GOLD `8fcf3576ea35c98da130d16c292d9967`。
+
+> **main 分支说明（2026-10-19）**：main 的 `los.yml` 已同时带 BBR 门控步骤与 `MARS-CLOSE-RANGE-436`
+> （KSU 期通用修复）。Release `los101-apatch-bbr` 的 **exact 构建**是 tag `los101-apatch-bbr`
+> （los96 + BBR，无 close-range）；APatch 下 436 仍被 KernelPatch supercall 占用，close-range 对 APatch
+> 无实际收益（容器 NAT 仍以 `nr436-shim` 为正解）。要与发布逐字节复现请用 tag/分支 `apatch-bbr`。

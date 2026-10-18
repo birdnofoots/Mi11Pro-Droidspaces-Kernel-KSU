@@ -1,15 +1,33 @@
-# mars 内核刷机指南（2026-10-12 更新 · los96 音频收官版）
+# mars 内核刷机指南（2026-10-19 更新 · **los101-apatch-bbr**，APatch + BBR）
 
 > 本文是**唯一权威刷机文档**（旧版 `docs-flash-guide.md` 已改为指针）。
-> 适用于 Release `los96-audio-final` 及之后的镜像；历史镜像（P3/los6x）同理。
+> **当前默认基线 = `los101-apatch-bbr`**（Release 同名），历史镜像（los96/los100-ksu/P3）同理。
 
 ---
 
-## ★ root 方案选择：APatch vs KernelSU（用户自选，2026-10-13 起）
+## ★ los101 变更（2026-10-19）
+
+- 基线 = **los96**（APatch 最后成功版）+ **BBR 开关**，没有 KSU 期改动。
+- **BBR 默认开启**：`CONFIG_TCP_CONG_BBR=y`、`CONFIG_DEFAULT_TCP_CONG="bbr"`、`CONFIG_NET_SCH_FQ=y`；
+  真机 `/proc/sys/net/ipv4/tcp_congestion_control` = `bbr`。
+- **root 默认 = APatch**；KernelSU v0.9.5 线转为**历史/可选**（非 GKI 上限就是 v0.9.5）。
+- 镜像：净版 boot `boot-Image-los101-apatch-bbr.img`（md5 `f0c43b99…`）；
+  APatch 打补丁后再刷（见 §0/§4）。BBR 自检：
+
+```bash
+adb shell 'zcat /proc/config.gz | grep -E "TCP_CONG_BBR|DEFAULT_TCP_CONG|NET_SCH_FQ"; \
+           cat /proc/sys/net/ipv4/tcp_congestion_control'
+# 期望: CONFIG_TCP_CONG_BBR=y / CONFIG_DEFAULT_TCP_CONG="bbr" / CONFIG_NET_SCH_FQ=y；运行时 bbr
+```
+
+---
+
+## ★ root 方案选择：APatch vs KernelSU（**los101 起默认 APatch**）
 
 > 两种 root 方案**择一使用**，差异核心在一句话：**APatch 的 KernelPatch 会占用 syscall 436
 > （"supercall"），而 KSU 不占** ⇒ 内核对 glibc/systemd 的 `close_range(436)` 行为不同
 > ⇒ **APatch 方案下容器要装 `nr436-shim`，KSU 方案下不用**。
+> **los101 基线是纯 APatch 内核（无 KSU）；KSU v0.9.5 仅作为历史/可选线保留，不再默认。**
 
 |  | **方案 A：APatch（默认）** | **方案 B：KernelSU v0.9.5** |
 |---|---|---|
@@ -44,21 +62,21 @@
 
 ---
 
-## 0. 快速通道（推荐）：刷 Release 的日用完全体 los96
+## 0. 快速通道（推荐）：刷 Release 的 **los101-apatch-bbr**
 
 ```bash
 # 0) 手机连电脑（USB 或 WiFi adb），确认设备
 adb devices
-#    ⚠️ 若 USB 与 WiFi 两个设备同时在线，先 adb disconnect 192.168.1.145:5555
+#    ⚠️ 若 USB 与 WiFi 两个设备同时在线，先 adb disconnect 192.168.43.246:5555
 #       留 USB 单通道，否则裸 adb 命令会报 "more than one device"
 
 # 1) ★先打 root 补丁，再刷（净版镜像直接刷会丢 root ⇒ 开机脚本不跑 ⇒ 没 WiFi！）
-#    Release 里的 boot-Image-los96.img 是"净版"（未打 root 补丁）。
+#    Release 里的 boot-Image-los101-apatch-bbr.img 是"净版"（未打 root 补丁）。
 #    方式 A（推荐，已 root 设备）：用本项目 flash-local.sh，它会自动 APatch 打补丁→dd→回读
-#    方式 B（任意设备）：装 APatch App → "选择并修补一个文件" → 选 boot-Image-los96.img
+#    方式 B（任意设备）：装 APatch App → "选择并修补一个文件" → 选 boot-Image-los101-apatch-bbr.img
 #      → 产出 patched_xxx.img 再刷它：
 adb reboot bootloader
-fastboot flash boot_a patched_boot-Image-los96.img   # ← 刷打过补丁的！
+fastboot flash boot_a patched_boot-Image-los101-apatch-bbr.img   # ← 刷打过补丁的！
 fastboot reboot
 
 # 2) 装开机脚本（★ WiFi 的命根子，必做）
@@ -66,12 +84,16 @@ adb push 99-wlan-mars.sh /data/local/tmp/
 adb shell su -c "cp /data/local/tmp/99-wlan-mars.sh /data/adb/service.d/99-wlan-mars.sh"
 adb shell su -c "chmod 755 /data/adb/service.d/99-wlan-mars.sh"
 
-# 3) 刷后核身份（防假阳性/刷错槽）
-adb shell 'uname -a; getprop ro.boot.slot_suffix; cat /proc/sys/kernel/random/boot_id'
-#    自编内核: "runner@..." + 2026 年日期 + 槽 _a；boot_id 重启后不应循环变化
+# 3) 刷后核身份 + BBR（防假阳性/刷错槽）
+adb shell 'uname -a; getprop ro.boot.slot_suffix; cat /proc/sys/kernel/random/boot_id; \
+           zcat /proc/config.gz | grep -E "TCP_CONG_BBR|DEFAULT_TCP_CONG"; \
+           cat /proc/sys/net/ipv4/tcp_congestion_control'
+#    自编内核: "runner@..." + 2026 年日期 + 槽 _a；BBR: =y / "bbr" / bbr
 ```
 
-**los96 = 日用完全体**：进 MIUI ✅ WiFi ✅ 触屏 ✅ 电池 ✅ 相机 ✅ **音频出声** ✅ 蓝牙 ✅ 容器 ✅
+**los101 = 新默认基线**：进 MIUI ✅ WiFi ✅ 触屏 ✅ 电池 ✅ 相机 ✅ 音频 ✅ **BBR=bbr** ✅ APatch root ✅ 容器 ✅
+md5：`boot-Image-los101-apatch-bbr.img` = `f0c43b9970adee2a63ccf9b3c9d70142`；
+`Image-los101-apatch-bbr` = `b10a6a1c0cf365aef30fcfc90a612593`。
 
 ---
 
@@ -129,8 +151,9 @@ fastboot reboot
 adb shell 'uname -r; su -c id; su -c droidspaces check'
 ```
 
-KSU 未生效时：装匹配版本的 KernelSU Manager（v0.7.6）；确认没装 APatch；
+KSU 未生效时：装匹配版本的 KernelSU Manager（v0.9.5）；确认没装 APatch；
 `strings /dev/block/by-name/boot | grep -c KernelSU`（需 root）复查。
+⚠️ **KSU 线自 los101 起仅历史/可选**（非 GKI 上限 v0.9.5，已不作为默认）。
 
 ---
 
@@ -151,23 +174,29 @@ fastboot reboot
 
 ## 5. 手机端 dd 刷法（无 fastboot 时，root 可用）
 
-149 自动化脚本 `flash-local.sh` 的等价手动流程：
+`flash-local.sh` 的等价手动流程（los101）：
 
 ```bash
-adb push boot-Image-los96.img /data/local/tmp/next.img
-adb shell su -c 'dd if=/data/local/tmp/next.img of=/dev/block/by-name/boot_a bs=1048576'
-adb shell su -c 'dd if=/dev/block/by-name/boot_a bs=1048576 count=61 | md5sum'   # 回读校验
+adb push boot-Image-los101-apatch-bbr-APatch.img /data/local/tmp/next.img
+# 先备份当前 boot_a（强烈建议）
+adb shell su -c 'dd if=/dev/block/by-name/boot_a of=/data/local/tmp/boot_a-backup.img bs=1M'
+adb shell su -c 'dd if=/data/local/tmp/next.img of=/dev/block/by-name/boot_a bs=1M conv=notrunc'
+adb shell su -c 'SZ=$(stat -c%s /data/local/tmp/next.img); dd if=/dev/block/by-name/boot_a bs=4096 count=$((SZ/4096)) | md5sum'
+adb shell su -c 'md5sum /data/local/tmp/next.img'   # 两个 md5 必须一致
 adb reboot
 ```
 
 ---
 
-## 6. 刷后验收（los96 音频版）
+## 6. 刷后验收（los101 · APatch + BBR）
 
 ```bash
 adb shell 'cat /proc/asound/cards'        # 期望: 0 [lahainamtpsndca]: lahaina-mtp-snd-card
 adb shell 'su -c dmesg | grep -c DSP1'    # 期望: 开机一段后稳定不增长
 adb shell 'getprop sys.boot_completed'    # 期望: 1（且 boot_id 稳定）
+adb shell 'zcat /proc/config.gz | grep -E "TCP_CONG_BBR|DEFAULT_TCP_CONG|NET_SCH_FQ"'
+adb shell 'cat /proc/sys/net/ipv4/tcp_congestion_control'   # 期望: bbr
+adb shell 'su -c id'                      # 期望: uid=0，APatch context u:r:magisk:s0
 tinyplay t.wav -D 0 -d 0                  # 期望: 出声（rc=0）
 ```
 完整背景与三连蜂鸣听音流程见 `docs/AUDIO-EPIC.md`。
@@ -176,8 +205,11 @@ tinyplay t.wav -D 0 -d 0                  # 期望: 出声（rc=0）
 
 ## 7. 回退
 
-- **回到日用完全体（推荐）**：刷 Release 的 `boot-Image-los96.img`（md5 `a18c89f2ced96836bee138ee20ceb33c`）。
-- **回到原厂+APatch**：刷 GOLD 镜像（§2.7）。
+- **回到 los101 基线（推荐）**：刷 Release 的 `boot-Image-los101-apatch-bbr.img`
+  （md5 `f0c43b9970adee2a63ccf9b3c9d70142`；记得先 APatch 打补丁）。
+- **回到刷机前的 KSU 版**：本地 `work/backups/boot_a-los100-ksu-backup-20261019.img`
+  （md5 `a0ae428e60cdcd1054347b6eaa2e78ea`，192MB 完整 boot_a 分区）→ `fastboot flash boot_a`。
+- **回到原厂+APatch**：刷 GOLD 镜像（§2.7，md5 `8fcf3576…`）。
 - 救砖：进 fastboot（电源+音量下）→ `fastboot flash boot_a <镜像> && fastboot reboot`。
 
 ---
@@ -192,5 +224,10 @@ A: 不含 KSU 的内核会**丢 root**（AnyKernel3 换内核 = 删掉 APatch �
 A: 十有八九是 `/data/adb/service.d/99-wlan-mars.sh` 没装/没 755。补上重启。
 
 **Q: 刷完没声音/打开播放器就重启？**
-A: 确认刷的是 los96 以上（`uname -a` 为 2026-10-12 后的 runner 构建）。
+A: 确认刷的是 los96 以上（los101 沿用 los96 音频栈；`uname -a` 为 2026-10 后的 runner 构建）。
 los95 及更早的音频栈有 TERT 上电秒死问题，见 `docs/AUDIO-EPIC.md`。
+
+**Q: 怎么确认 BBR 真的开了？**
+A: `zcat /proc/config.gz | grep -E "TCP_CONG_BBR|DEFAULT_TCP_CONG"` 应为 `=y` / `"bbr"`；
+`cat /proc/sys/net/ipv4/tcp_congestion_control` 应为 `bbr`。内核内建，不需要 `insmod`/`sysctl`。
+（`NET_SCH_FQ=y` 也已编入；`wlan0` 当前 qdisc 仍是 `mq/pfifo_fast`，BBR 本身不依赖它。）

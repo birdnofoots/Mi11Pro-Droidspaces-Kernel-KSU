@@ -1,31 +1,41 @@
 # AGENTS.md — mars / Droidspaces 内核
 
-给小米 11 Pro（mars, SM8350, MIUI14/Android13, 内核 `5.4.233-qgki-gbb70cde46897`）
+给小米 11 Pro（mars, SM8350, MIUI14/Android13, 内核 `5.4.242-qgki-gbb70cde46897`）
 自编 **Droidspaces 容器内核** 的真机调试 + GitHub Actions 编译工作区。
 
 **先读** `VERSIONS.md`（权威：P1 里程碑 / 镜像血缘 / 根因表 / 配方）和 `TAKEOVER.md`
 （实验流水）。`STATUS.md`/`HANDOVER.md`/`INDEX.md` 是早期存档，冲突时以 `VERSIONS.md` 为准。
 
-## 当前基线（2026-10-10 ★ P3：WiFi 可用版，已全项验收）
+## 当前基线（2026-10-19 ★ los101-apatch-bbr：APatch + BBR，已真机验收）
 
-- **当前手机跑的就是这一版**：`work/keep-p3/boot-Image-mars-P3-5.4.242.img`
-  （md5 `663ce79e…`；内核 `5.4.242-qgki-gbb70cde46897`，槽 `_a`，MODVERSIONS=n）
-  → 进 MIUI ✅ / **WiFi 自动联网** ✅ / 触屏 ✅ / `droidspaces check` 28/28 ✅ / alpine 容器可起 ✅
-- **保留三份**（都带 `MD5SUMS` + `MANIFEST.md`）：
-  149 `~/mars-build/KEEP/2026-10-10-P3-wifi-OK/`、149 `~/KEEP-P3-2026-10-10/`、本仓 `work/keep-p3/`
-- **救机**：`work/boot_a-stock-69m.img`（原厂+APatch root）；
-  149 上 `~/mars/eng/builds/apatch-patched-boot-0.13.3.img`（md5 `8fcf3576ea35c98da130d16c292d9967`）
-- **配方**：LineageOS `android_kernel_xiaomi_sm8350@d42d2eb6c`(lineage-20, 5.4.242) + 真机原厂 config
-  + allbuiltin + kabi + ignore_vermagic + mi_syms + hwid_deexport + `wlanblock=1`，CI run `37962039123`
+- **手机当前跑的就是这一版**：`boot-Image-los101-apatch-bbr-APatch.img`
+  （md5 `a43083b5…`；内核 `5.4.242-qgki-gbb70cde46897` #26；槽 `_a`；APatch root）。
+- **Release/tag**：`los101-apatch-bbr`（净版 boot `f0c43b99…` / Image `b10a6a1c…`），CI run `39174084270`。
+- **基线来源**：**los96**（APatch 最后成功版，run `38245465726` / commit `ab81bdb`）+ BBR 开关；
+  **没有** KSU 期改动（无 close-range-436；APatch 下 436 仍靠 shim）。
+- **main 分支**：`los.yml` 已同时带 BBR 门控 + `MARS-CLOSE-RANGE-436`；los101 发布 exact 构建 = tag
+  `los101-apatch-bbr`（los96 + BBR，无 close-range）。APatch 下 436 仍靠 shim。
+- **root 方案**：默认 **APatch**（个人 superkey 不入库；`u:r:magisk:s0`、`apd`）；
+  **KernelSU v0.9.5 仅历史/可选**，不再默认（非 GKI 上限就是 v0.9.5）。
+- **BBR**：`CONFIG_TCP_CONG_BBR=y`、`CONFIG_DEFAULT_TCP_CONG="bbr"`、`CONFIG_NET_SCH_FQ=y`；
+  真机 `/proc/sys/net/ipv4/tcp_congestion_control` = `bbr`。
+- **配方**：GOLD JSON + `mi_syms_audio=1` + `extra_config` 末尾 **`BBR`**，`los_commit=d42d2eb6c`；
+  **不加 `KSU` 标记**。BBR 步骤只在 `extra_config` 含 `BBR` 时执行。
+- **验证**：进 MIUI ✅ / WiFi 自动联网 ✅ / 触屏/电池/相机 ✅ / 音频 ✅ /
+  `droidspaces check` required 全过 ✅ / APatch root ✅ / BBR=bbr ✅。
 - **WiFi 靠原厂栈**（不是我们自编的）：INI 不许被盖 + `/data/adb/service.d/99-wlan-mars.sh`
-  按固定顺序装原厂 `cnss2.ko` → CBC → `qca_cld3_wlan.ko`。细节见 `work/keep-p3/MANIFEST.md` §4。
-- 手机地址（2026-10-13 起改线）：**USB `d6fba222` 直接接在一加上，本容器可直连** `adb -s d6fba222`。
+  （v6，md5 `6a5d5247…`）按固定顺序装原厂 `cnss2.ko` → CBC → `qca_cld3_wlan.ko`。
+- **保留**：本机 `work/keep-los126-apatch-bbr/`（Image / 净版 boot / APatch boot / modules / config / MD5SUMS / MANIFEST）。
+- **救机**：刷前 KSU boot 完整备份 `work/backups/boot_a-los100-ksu-backup-20261019.img`
+  （md5 `a0ae428e…`）；原厂+APatch GOLD `8fcf3576ea35c98da130d16c292d9967`。
+- 手机地址：**USB `d6fba222` 直接接在一加上，本容器可直连** `adb -s d6fba222`。
   ⚠️ 容器里 `lsusb` 能看到 mars（`2717:ff48`）但可能缺 `/dev/bus/usb` 节点 ⇒ adb 扫不到：
   跑 `bash scripts/usb-link-setup.sh`（自动 mknod major 189 补节点 + 重启 adb server）。
-  WiFi adb：`adb -s 192.168.43.246:5555`（一加热点网段 `192.168.43.x`，IP 会变，全段扫 5555 找
-  `product:mars_eea`；重启后若连不上需重新 `adb tcpip 5555` 或重开无线调试）。
+  WiFi adb：`adb -s 192.168.43.246:5555`（一加热点网段 `192.168.43.x`，IP 会变）。
   旧链路（手机插 149 + `192.168.1.145` + `ssh justin@192.168.1.149`）自 2026-10-13 出门起作废。
 - **绝不动一加手机**（`172.28.0.1:5555` 是宿主机！）。只操作 mars。
+
+> 下面 P3/历史段落（2026-10-10）保留作背景；**最新配方/镜像以本节 + `VERSIONS.md` 文末 §los101 为准**。
 
 ## 硬约束
 
@@ -34,19 +44,24 @@
    python3 /tmp/ghdisp2.py los.yml '{"config":"mars_factory.config","logdump":"1","wlanblock":"1",
      "ignore_vermagic":"1","mi_syms":"1","kabi":"1","allbuiltin":"1",
      "force_m":"CNSS2,CNSS_GENL,WCNSS_MEM_PRE_ALLOC","force_y":"CNSS_QCA6490",
-     "hwid_deexport":"1","modules":"1","firmware_embed":"1","los_commit":"d42d2eb6c"}'
+     "hwid_deexport":"1","modules":"1","firmware_embed":"1","los_commit":"d42d2eb6c",
+     "mi_syms_audio":"1",
+     "extra_config":"-d PANIC_ON_OOPS,-d QCOM_FORCE_WDOG_BITE_ON_PANIC,-d PANIC_ON_SSR_NOTIF_TIMEOUT,-d DEBUG_POWER_MI,-e DETECT_HUNG_TASK,--set-val DEFAULT_HUNG_TASK_TIMEOUT 15,BBR"}'
    ```
    （`firmware_embed` 可选；**别加 `CNSS_UTILS`/`ICNSS2` 到 `force_m`**，见"关键配方"里的红字警告）
-   可复现脚本：`scripts/dispatch-final.sh`（GOLD 配方）。`los_commit` 一定要钉死（否则跟随分支头）。
+   `extra_config` 末尾的 **`BBR`** = 打开 BBR；去掉 = los96 原样。**不加 `KSU` = APatch 内核**（当前默认）。
+   可复现脚本：`scripts/dispatch-los101.sh [ref]`（los101 GOLD + BBR）。`los_commit` 一定要钉死（否则跟随分支头）。
    ⚠️ 历史：MiCode `star-r-oss`(5.4.61) 老树已废弃（vendor 模块 ABI 对不上）。
 2. **`fastboot boot` 不可用**。只用 `fastboot flash boot_a`。
 3. **只改 `boot_a`**；活动槽必须 `_a`（**不要 `set_active b`**，会从错误槽启动）。
-4. **刷完必须核对内核身份**（防假阳性）：
+4. **刷完必须核对内核身份 + BBR**（防假阳性）：
    ```bash
-   adb shell 'uname -a; zcat /proc/config.gz | grep MODVERSIONS; cat /proc/cmdline'
+   adb shell 'uname -a; zcat /proc/config.gz | grep -E "MODVERSIONS|TCP_CONG_BBR|DEFAULT_TCP_CONG"; \
+              cat /proc/sys/net/ipv4/tcp_congestion_control; cat /proc/cmdline'
    ```
    自编：`runner@` + `2026` 年日期 + `# CONFIG_MODVERSIONS is not set`。
    原厂：`builder@pangu-build-component-vendor-…` + `Wed Dec 20 08:12:00 UTC 2023`。
+   los101：`CONFIG_TCP_CONG_BBR=y`、`CONFIG_DEFAULT_TCP_CONG="bbr"`、运行时 `bbr`。
 5. 一次只改一项；证据分级 `[目]/[log]/[adb]/[?]`；失败立刻回滚（adb 能连就 GOLD 恢复脚本，否则 fastboot）。
 6. `pkill -f` 会自杀 → 用 `ps | grep '[x]xx'`；`pkill -f` 的模式别出现在同一条命令行里。
 7. 别碰 `typec/port0/data_role`；别对 dwc3 unbind。
@@ -96,14 +111,18 @@
   + `Module.symvers-los52`）、日志 `logs-mars/`、证据 `evidence-mars/`、旧镜像 `images-old/`、另一台机 polaris 的
   `polaris/`、安装包 `apks/`）；`/tmp` 已清空（12K）
 
-## 关键配方（当前 · 2026-10-10）
+## 关键配方（当前 · 2026-10-19 · los101-apatch-bbr）
 
 - **内核**：LineageOS `android_kernel_xiaomi_sm8350` `lineage-20`（5.4.242，tip `d42d2eb6c`）
   + 真机原厂 config `gh/configs/mars_factory.config` + 容器项（`container-opts.sh`）
 - **必备开关**：`allbuiltin=1`（原厂 `=m` 全内建，USB/触屏/电池链才起得来）、
   `force_m=CNSS2,CNSS_GENL,WCNSS_MEM_PRE_ALLOC`、`force_y=CNSS_QCA6490`、
-  `kabi=1`、`ignore_vermagic=1`、`mi_syms=1`、`hwid_deexport=1`、`logdump=1`、`wlanblock=1`
-  ⚠️ **千万别把 `CNSS_UTILS`/`ICNSS2` 塞进 `force_m`**（2026-10-10 §41.85 实测）：工厂表里它们是 `=y`、
+  `kabi=1`、`ignore_vermagic=1`、`mi_syms=1`、`hwid_deexport=1`、`logdump=1`、`wlanblock=1`、
+  `mi_syms_audio=1`
+- **BBR**：`extra_config` 末尾加 `BBR`（= `TCP_CONG_ADVANCED/BBR/FQ` + 默认 bbr）；不加则 los96 原样。
+  断言：`CONFIG_TCP_CONG_BBR=y`、`CONFIG_DEFAULT_TCP_CONG="bbr"`、`CONFIG_NET_SCH_FQ=y`。
+- **root**：不加 `KSU` 标记 = APatch（当前默认）；`KSU` 标记 = 历史 v0.9.5 线，非默认。
+- ⚠️ **千万别把 `CNSS_UTILS`/`ICNSS2` 塞进 `force_m`**（2026-10-10 §41.85 实测）：工厂表里它们是 `=y`、
   真机内核也是内建、`/vendor` 里那份 `5.4-gki/cnss_utils.ko` 在 P3 上 insmod 报 `invalid module format`，
   一旦变成 `=m` 就没有 `cnss_utils` 符号 ⇒ 原厂 `cnss2.ko` 装不上 ⇒ **WiFi 直接挂**。
   （历史 P3 之所以能用，是"缓存毒化"让它保持了 `=y`；曾因此产出 los52/54/55/56/57 五个带风险的候选，已降级/取消。）
@@ -113,9 +132,11 @@
   当前有效候选：**los58**（P3 实际配置 + 固件内建，run `38012926791`）、
   **los59**（los58 + 蓝牙四项，run `38012935558`）。
   ⚠️ los52/los54/los55 因为 `CNSS_UTILS=m` **有 WiFi 风险，只作存档，别刷**（los56/los57 已 cancel）。
-- **boot 打包**：原厂 `ref/boot-header.bin` + **无 recovery ramdisk** `ref/boot-ramdisk-norec.gz` + Image
+- **boot 打包**：原厂 `ref/boot-header.bin` + **无 recovery ramdisk**（本地
+  `work/oneplus-kit/boot-ramdisk-norec.gz`，20,352,914 B；仓库 `ref/boot-ramdisk.gz` 是含 recovery 的版本）+ Image
   → `tools/make-bootimg.py`；刷机走 `flash-local.sh`（APatch kptools + dd 活动槽 + 回读校验）；
-  通用刷机+计时+验收：`scripts-mars/flash-tag.sh <tag>`
+  通用刷机+计时+验收：`scripts-mars/flash-tag.sh <tag>`。
+  los101 另有现成净版 boot（Release）与已打 APatch 的 boot（本地 `work/keep-los126-apatch-bbr/`）。
 - **WLAN（关键）**：用**原厂** `cnss2.ko` + `qca_cld3_wlan.ko`，顺序见血泪坑；不要用我们自编的那套
 
 ## 手机侧开机脚本（★ 唯一一个，必须保留）
@@ -185,8 +206,10 @@ adb shell 'getprop ro.boot.slot_suffix; cat /proc/version'
 - **救机**：stock 已在 `boot_a` 时，只需 `fastboot set_active a` + reboot，**不用重刷**
 
 **镜像**（当前）：
-- **P3 可用版**：`work/keep-p3/boot-Image-mars-P3-5.4.242.img`（md5 `663ce79e…`）← 现在手机里就是这个
-- 原厂 GOLD：149 `~/mars/eng/builds/apatch-patched-boot-0.13.3.img`（md5 `8fcf3576…`）/
+- **los101 基线**：`work/keep-los126-apatch-bbr/boot-Image-los126-apatch-bbr-APatch.img`
+ （md5 `a43083b5…`，已刷入手机；净版 Release 资产 `boot-Image-los101-apatch-bbr.img` md5 `f0c43b99…`）
+- **刷前 KSU 备份**：`work/backups/boot_a-los100-ksu-backup-20261019.img`（192MB，md5 `a0ae428e…`）
+- 原厂 GOLD：`~/mars/eng/builds/apatch-patched-boot-0.13.3.img`（md5 `8fcf3576…`）/
   `work/boot_a-stock-69m.img`（md5 `58916775…`，分区前 72MB）
 
 ## 常用命令（当前流程：mars 直插一加 USB，本容器直连）
@@ -216,6 +239,6 @@ $S 'bash ~/mars-keep/2026-10-10-tmp-archive/scripts-mars/acceptance2.sh'   # 身
 $S 'adb shell "su -c /data/local/tmp/droidspaces check"'
 
 # 5) 派发新编译（本容器）
-python3 /tmp/ghdisp2.py los.yml '<见硬约束 1 的 JSON>'
-nohup bash /tmp/losw/dl-run-all.sh <run_id> <tag> > /tmp/dl-<tag>.log 2>&1 &   # 产物拉到 149(本容器侧临时文件, 无妨)
+scripts/dispatch-los101.sh main        # 或 apatch-bbr（BBR 步骤所在分支）
+nohup bash /tmp/losw/dl-run-all.sh <run_id> <tag> > /tmp/dl-<tag>.log 2>&1 &   # 产物拉取(临时脚本, 可选)
 ```
