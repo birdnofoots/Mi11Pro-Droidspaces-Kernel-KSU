@@ -248,6 +248,10 @@ jobs:
                    IP_NF_TARGET_MASQUERADE; do
             grep -q "^CONFIG_$k=y" out/.config || { echo "::warning::容器项 $k 不是 y"; fail=1; }
           done
+          # Droidspaces 7.0 的 IPv6 NAT 检查（用户明确要开；Macvlan/CFS_BANDWIDTH 明确不开）
+          for k in IP6_NF_IPTABLES IP6_NF_NAT IP6_NF_TARGET_MASQUERADE; do
+            grep -q "^CONFIG_$k=y" out/.config || { echo "::error::Droidspaces 7 IPv6 NAT: $k 不是 y"; fail=1; }
+          done
           for k in CFI_CLANG LTO_CLANG THINLTO; do
             # 老树(5.4.233)可能不支持 CFI/LTO: 只告警不失败(只影响代码生成, 不影响 ABI)
             grep -q "^CONFIG_$k=y" out/.config || echo "::warning::$k 未启用(该树可能不支持), 继续"
