@@ -5,6 +5,9 @@
 
 ---
 
+> ⚠️ 本 tag `los101-apatch-bbr` 是**纯 APatch**：不含 KSU 整合步骤 / `MARS-CLOSE-RANGE-436`；
+> KSU/close-range 说明见 main 历史分支。容器 shim 源码在本 tag `patches/nr436-shim*`。
+
 ## ★ los101 变更（2026-10-19）
 
 - 基线 = **los96**（APatch 最后成功版）+ **BBR 开关**，没有 KSU 期改动。

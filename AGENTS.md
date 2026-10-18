@@ -13,6 +13,7 @@
 - **Release/tag**：`los101-apatch-bbr`（净版 boot `f0c43b99…` / Image `b10a6a1c…`），CI run `39174084270`。
 - **基线来源**：**los96**（APatch 最后成功版，run `38245465726` / commit `ab81bdb`）+ BBR 开关；
   **没有** KSU 期改动（无 close-range-436；APatch 下 436 仍靠 shim）。
+- **本 tag 范围**：纯 APatch（无 KSU 整合步骤 / 无 close-range-436）；容器 `nr436-shim` 源码随仓（`patches/nr436-shim*`）。
 - **root 方案**：默认 **APatch**（个人 superkey 不入库；`u:r:magisk:s0`、`apd`）；
   **KernelSU v0.9.5 仅历史/可选**，不再默认（非 GKI 上限就是 v0.9.5）。
 - **BBR**：`CONFIG_TCP_CONG_BBR=y`、`CONFIG_DEFAULT_TCP_CONG="bbr"`、`CONFIG_NET_SCH_FQ=y`；

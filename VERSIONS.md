@@ -1766,6 +1766,8 @@ USB 直连排障：容器里 `lsusb` 能见 mars（`2717:ff48`）但 adb 扫不�
 **基线选择**：用 APatch 最后成功版 **los96**（run `38245465726`，commit `ab81bdb`，release `los96-audio-final`），
 不引入 KSU 期改动；只加 BBR 开关。
 
+**范围**：本 tag 是纯 APatch（无 KSU 整合步骤、无 close-range-436）；容器 shim 源码随仓（`patches/nr436-shim*`）。
+
 **先确认 los96 的 BBR 是关的**（从 los96 artifact 的 Image 内嵌 IKCONFIG 提取，非猜测）：
 ```text
 # CONFIG_TCP_CONG_ADVANCED is not set
