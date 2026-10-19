@@ -252,6 +252,12 @@ jobs:
           for k in IP6_NF_IPTABLES IP6_NF_NAT IP6_NF_TARGET_MASQUERADE; do
             grep -q "^CONFIG_$k=y" out/.config || { echo "::error::Droidspaces 7 IPv6 NAT: $k 不是 y"; fail=1; }
           done
+          # 容器里再跑 Docker（los103）：Droidspaces 7 完整 netfilter/cgroup 项
+          for k in BRIDGE_NETFILTER CGROUP_NET_PRIO FW_LOADER_COMPRESS IP_SET IP_SET_HASH_IP \
+                   IP_SET_HASH_NET NETFILTER_XT_MATCH_ADDRTYPE NETFILTER_XT_MATCH_RECENT \
+                   NETFILTER_XT_SET NETFILTER_XT_TARGET_LOG NF_TABLES TMPFS_POSIX_ACL TMPFS_XATTR; do
+            grep -q "^CONFIG_$k=y" out/.config || { echo "::error::Docker/nested: $k 不是 y"; fail=1; }
+          done
           for k in CFI_CLANG LTO_CLANG THINLTO; do
             # 老树(5.4.233)可能不支持 CFI/LTO: 只告警不失败(只影响代码生成, 不影响 ABI)
             grep -q "^CONFIG_$k=y" out/.config || echo "::warning::$k 未启用(该树可能不支持), 继续"

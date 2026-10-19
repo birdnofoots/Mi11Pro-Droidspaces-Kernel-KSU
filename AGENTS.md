@@ -6,40 +6,45 @@
 **先读** `VERSIONS.md`（权威：P1 里程碑 / 镜像血缘 / 根因表 / 配方）和 `TAKEOVER.md`
 （实验流水）。`STATUS.md`/`HANDOVER.md`/`INDEX.md` 是早期存档，冲突时以 `VERSIONS.md` 为准。
 
-## 当前基线（2026-10-19 ★ los102-apatch-bbr：APatch + BBR + IPv6 NAT，已真机验收）
+## 当前基线（2026-10-19 ★ los103-apatch-bbr：APatch + BBR + IPv6 NAT + Docker/nested）
 
-- **手机当前跑的就是这一版**：内核 `5.4.242-qgki-gbb70cde46897` **#27**（`runner@`；
-  槽 `_a`；APatch 11282 重新打补丁后已启动）。净版 Release（未打 root）见下。
-- **Release/tag**：`los102-apatch-bbr`（净版 boot `85ab08c3…` / Image `117622f8…`），CI run `39177932470`。
-- **基线来源**：los101（los96 + BBR）+ **IPv6 NAT**（`IP6_NF_NAT` / `IP6_NF_TARGET_MASQUERADE`）；
-  **没有** KSU 期改动（无 close-range-436；APatch 下 436 仍靠 shim）。
-- **main 分支**：`los.yml` 已同时带 BBR 门控 + `MARS-CLOSE-RANGE-436`；los102 发布 exact 构建 = tag
-  `los102-apatch-bbr`（los101 + IPv6 NAT，无 close-range）。APatch 下 436 仍靠 shim。
-- **本 tag 范围**：纯 APatch（无 KSU 整合步骤 / 无 close-range-436）；容器 `nr436-shim` 源码随仓（`patches/nr436-shim*`）。
+- **手机当前跑的就是这一版**：内核 `5.4.242-qgki-gbb70cde46897` **#28**（`runner@`；槽 `_a`；
+  APatch 11282 打补丁后已启动；`systemctl is-system-running=running`）。
+- **Release/tag**：`los103-apatch-bbr`（净版 boot `c4b8171d…` / Image `d46f0c1b…`），CI run `39182702193`。
+- **基线来源**：los102（los101 + IPv6 NAT）+ **Docker/nested netfilter**：
+  `BRIDGE_NETFILTER`、`IP_SET*`、`NETFILTER_XT_MATCH_ADDRTYPE/RECENT`、`NETFILTER_XT_SET`、
+  `NETFILTER_XT_TARGET_LOG`、`NF_TABLES`、`TMPFS_XATTR/POSIX_ACL`、`CGROUP_NET_PRIO`。
+  没有 KSU 期改动（无 close-range-436；APatch 下 436 仍靠 shim）。
+- **main 分支**：`los.yml` 已同时带 BBR 门控、IPv6 NAT/Docker 断言与 `MARS-CLOSE-RANGE-436`；
+  los103 发布 exact 构建 = tag `los103-apatch-bbr`（los102 + Docker/nested，无 close-range）。
+- **Docker/nested 实测**：容器内 `docker run --rm hello-world` ✅；
+  `docker run --rm alpine` bridge `172.17.0.2` ping `1.1.1.1` 0% ✅；`systemctl is-system-running=running`。
 - **root 方案**：默认 **APatch**（个人 superkey 不入库；`u:r:magisk:s0`、`apd`）；
-  **KernelSU v0.9.5 仅历史/可选**，不再默认（非 GKI 上限就是 v0.9.5）。
-- **APatch 版本**：手机已升级到 **11282**；打补丁用**同版本** APatch App 的 `kptools`/`kpimg`
-  （本机 `work/apatch-payload-11282/` 已同步；旧 0.13.3 payload 仅存档）。内核编译不依赖 APatch 版本。
-- **BBR**：`CONFIG_TCP_CONG_BBR=y`、`CONFIG_DEFAULT_TCP_CONG="bbr"`、`CONFIG_NET_SCH_FQ=y`；
-  真机 `/proc/sys/net/ipv4/tcp_congestion_control` = `bbr`。
-- **IPv6 NAT**：`CONFIG_IP6_NF_NAT=y`、`CONFIG_IP6_NF_TARGET_MASQUERADE=y`（Droidspaces 7.0 检查 ✅）；
-  **Macvlan / CFS_BANDWIDTH 按用户要求不开**（黄色 X 可忽略）。
-- **配方**：GOLD JSON + `mi_syms_audio=1` + `extra_config` 末尾 **`BBR`**，`los_commit=d42d2eb6c`；
-  **不加 `KSU` 标记**。IPv6 NAT 已在 `configs/mars_factory.config` 基线上，CI 有断言。
-- **验证**：进 MIUI ✅ / WiFi 自动联网 ✅ / 触屏/电池/相机 ✅ / 音频 ✅ /
-  `droidspaces check` required 全过 ✅ / APatch root ✅ / BBR=bbr ✅ / IPv6 NAT ✅。
-- **WiFi 靠原厂栈**（不是我们自编的）：INI 不许被盖 + `/data/adb/service.d/99-wlan-mars.sh`
-  （v6，md5 `6a5d5247…`）按固定顺序装原厂 `cnss2.ko` → CBC → `qca_cld3_wlan.ko`。
-- **保留**：本机 `work/keep-los128-apatch-bbr/`（Image / 净版 boot / modules / config / MD5SUMS / MANIFEST）；
-  los101 的 `work/keep-los126-apatch-bbr/` 保留作回退。
-- **救机**：刷前 los101 boot 完整备份 `work/backups/boot_a-los101-backup-20261019.img`
-  （md5 `f48477ea…`）；KSU 备份 `work/backups/boot_a-los100-ksu-backup-20261019.img`
-  （md5 `a0ae428e…`）；原厂+APatch GOLD `8fcf3576ea35c98da130d16c292d9967`。
-- 手机地址：**USB `d6fba222`**（缺节点跑 `bash scripts/usb-link-setup.sh`）；WiFi adb
-  `adb -s 192.168.43.246:5555`（一加热点网段 `192.168.43.x`，IP 会变）。
+  **KernelSU v0.9.5 仅历史/可选**，不再默认。
+- **APatch 版本**：手机 **11282**；打补丁用同版本 App 的 `kptools`/`kpimg`
+  （`work/apatch-payload-11282/`；旧 0.13.3 在 `work/apatch-payload-d03-backup/`）。
+  11282 对 64MB boot 会提示 “no room for AVB footer”，但解锁 bootloader 下实测能启动。
+- **nr436-shim（容器长期位）**：Droidspaces 7.0 会把 `/sbin/init` 重置成 systemd 符号链，
+  所以 systemd 容器把 shim 放在 **`/lib/systemd/systemd`**，真 systemd 在 `/lib/systemd/systemd.real`，
+  `/sbin/init.real -> /lib/systemd/systemd.real`；`/sbin/init -> /lib/systemd/systemd` 仍指向 shim。
+  `patches/nr436-shim-install.sh` 已按这个方式更新；`patches/nr436-shim` 为预编译 arm64 静态二进制。
+- **apt/Docker 源**：ubuntu 容器 apt 换 **阿里云 `ubuntu-ports`**（`/etc/apt/sources.list.bak-20261019-003757`）；
+  Docker 镜像加速 `docker.1panel.live` + `docker.xuanyuan.me`（`/etc/docker/daemon.json`）。
+- **BBR**：`CONFIG_TCP_CONG_BBR=y`、`DEFAULT_TCP_CONG="bbr"`、`NET_SCH_FQ=y`；真机 `bbr`。
+- **IPv6 NAT**：`IP6_NF_NAT=y`、`IP6_NF_TARGET_MASQUERADE=y`（Droidspaces 7.0 检查 ✅）。
+- **配方**：GOLD JSON + `mi_syms_audio=1` + `extra_config` 末尾 `BBR`，`los_commit=d42d2eb6c`；
+  **不加 `KSU`**。Docker/IPv6 配置已在 `configs/mars_factory.config` 基线，CI 断言。
+- **验证**：进 MIUI ✅ / WiFi ✅ / 触屏/电池/相机 ✅ / 音频 ✅ / `droidspaces check` required 全过 ✅ /
+  APatch root ✅ / BBR=bbr ✅ / IPv6 NAT ✅ / Docker+nested ✅。
+- **WiFi**：原厂栈 + `/data/adb/service.d/99-wlan-mars.sh`（v6，md5 `6a5d5247…`）。
+- **保留**：`work/keep-los129-apatch-bbr/`（Image / 净版 boot / modules / config / MD5SUMS / MANIFEST）；
+  回退：los102 `work/keep-los128-apatch-bbr/`、los101 `work/keep-los126-apatch-bbr/`。
+- **救机**：`work/backups/boot_a-los102-apatch11282-backup-20261019.img`（md5 `99d81c33…`）、
+  `boot_a-los101-backup-20261019.img`（`f48477ea…`）、KSU 备份 `a0ae428e…`；GOLD `8fcf3576…`。
+- 手机地址：USB `d6fba222`（缺节点跑 `scripts/usb-link-setup.sh`）；WiFi adb `adb -s 192.168.43.246:5555`。
 - **绝不动一加手机**（`172.28.0.1:5555` 是宿主机！）。只操作 mars。
 
-> 下面 P3/历史段落（2026-10-10）保留作背景；**最新配方/镜像以本节 + `VERSIONS.md` 文末 §los102 为准**。
+> 下面 P3/历史段落（2026-10-10）保留作背景；**最新配方/镜像以本节 + `VERSIONS.md` 文末 §los103 为准**。
 
 ## 硬约束
 
@@ -54,7 +59,7 @@
    ```
    （`firmware_embed` 可选；**别加 `CNSS_UTILS`/`ICNSS2` 到 `force_m`**，见"关键配方"里的红字警告）
    `extra_config` 末尾的 **`BBR`** = 打开 BBR；去掉 = los96 原样。**不加 `KSU` = APatch 内核**（当前默认）。
-   可复现脚本：`scripts/dispatch-los102.sh [ref]`（los102 GOLD + BBR；IPv6 NAT 已在基线 config）。`los_commit` 一定要钉死（否则跟随分支头）。
+   可复现脚本：`scripts/dispatch-los103.sh [ref]`（los103 GOLD + BBR；IPv6/IPv6 NAT/Docker 已在基线 config）。`los_commit` 一定要钉死（否则跟随分支头）。
    ⚠️ 历史：MiCode `star-r-oss`(5.4.61) 老树已废弃（vendor 模块 ABI 对不上）。
 2. **`fastboot boot` 不可用**。只用 `fastboot flash boot_a`。
 3. **只改 `boot_a`**；活动槽必须 `_a`（**不要 `set_active b`**，会从错误槽启动）。
@@ -65,8 +70,8 @@
    ```
    自编：`runner@` + `2026` 年日期 + `# CONFIG_MODVERSIONS is not set`。
    原厂：`builder@pangu-build-component-vendor-…` + `Wed Dec 20 08:12:00 UTC 2023`。
-   los102：`CONFIG_TCP_CONG_BBR=y`、`CONFIG_DEFAULT_TCP_CONG="bbr"`、`CONFIG_IP6_NF_NAT=y`、
-   `CONFIG_IP6_NF_TARGET_MASQUERADE=y`、运行时 `bbr`。
+   los103：`CONFIG_TCP_CONG_BBR=y`、`DEFAULT_TCP_CONG="bbr"`、`CONFIG_IP6_NF_NAT=y`、
+   `CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y`、`CONFIG_IP_SET=y`、`CONFIG_NF_TABLES=y`、运行时 `bbr`。
 5. 一次只改一项；证据分级 `[目]/[log]/[adb]/[?]`；失败立刻回滚（adb 能连就 GOLD 恢复脚本，否则 fastboot）。
 6. `pkill -f` 会自杀 → 用 `ps | grep '[x]xx'`；`pkill -f` 的模式别出现在同一条命令行里。
 7. 别碰 `typec/port0/data_role`；别对 dwc3 unbind。
@@ -116,7 +121,7 @@
   + `Module.symvers-los52`）、日志 `logs-mars/`、证据 `evidence-mars/`、旧镜像 `images-old/`、另一台机 polaris 的
   `polaris/`、安装包 `apks/`）；`/tmp` 已清空（12K）
 
-## 关键配方（当前 · 2026-10-19 · los102-apatch-bbr）
+## 关键配方（当前 · 2026-10-19 · los103-apatch-bbr）
 
 - **内核**：LineageOS `android_kernel_xiaomi_sm8350` `lineage-20`（5.4.242，tip `d42d2eb6c`）
   + 真机原厂 config `gh/configs/mars_factory.config` + 容器项（`container-opts.sh`）
@@ -126,8 +131,10 @@
   `mi_syms_audio=1`
 - **BBR**：`extra_config` 末尾加 `BBR`（= `TCP_CONG_ADVANCED/BBR/FQ` + 默认 bbr）；不加则 los96 原样。
   断言：`CONFIG_TCP_CONG_BBR=y`、`CONFIG_DEFAULT_TCP_CONG="bbr"`、`CONFIG_NET_SCH_FQ=y`。
-- **IPv6 NAT**：`configs/mars_factory.config` 已含 `CONFIG_IP6_NF_NAT=y` + `CONFIG_IP6_NF_TARGET_MASQUERADE=y`，
-  CI 在 config 步断言（Droidspaces 7.0 检查）。**Macvlan / CFS_BANDWIDTH 按用户要求不开**。
+- **IPv6 NAT**：`CONFIG_IP6_NF_NAT=y` + `CONFIG_IP6_NF_TARGET_MASQUERADE=y`（Droidspaces 7.0 检查 ✅）。
+- **Docker/nested**：`BRIDGE_NETFILTER`、`IP_SET/HASH_IP/HASH_NET`、`NETFILTER_XT_MATCH_ADDRTYPE/RECENT`、
+  `NETFILTER_XT_SET`、`NETFILTER_XT_TARGET_LOG`、`NF_TABLES`、`TMPFS_XATTR/POSIX_ACL`、`CGROUP_NET_PRIO`，
+  CI 断言。**Macvlan / CFS_BANDWIDTH 按用户要求不开**。
 - **root**：不加 `KSU` 标记 = APatch（当前默认）；`KSU` 标记 = 历史 v0.9.5 线，非默认。
 - ⚠️ **千万别把 `CNSS_UTILS`/`ICNSS2` 塞进 `force_m`**（2026-10-10 §41.85 实测）：工厂表里它们是 `=y`、
   真机内核也是内建、`/vendor` 里那份 `5.4-gki/cnss_utils.ko` 在 P3 上 insmod 报 `invalid module format`，
@@ -143,7 +150,7 @@
   `work/oneplus-kit/boot-ramdisk-norec.gz`，20,352,914 B；仓库 `ref/boot-ramdisk.gz` 是含 recovery 的版本）+ Image
   → `tools/make-bootimg.py`；刷机走 `flash-local.sh`（APatch kptools + dd 活动槽 + 回读校验）；
   通用刷机+计时+验收：`scripts-mars/flash-tag.sh <tag>`。
-  los102 另有现成净版 boot（Release）与已打 APatch 的 boot（本地 `work/keep-los128-apatch-bbr/`）。
+  los103 另有现成净版 boot（Release）与已打 APatch 11282 的 boot（本地 `work/keep-los129-apatch-bbr/`）。
 - **WLAN（关键）**：用**原厂** `cnss2.ko` + `qca_cld3_wlan.ko`，顺序见血泪坑；不要用我们自编的那套
 
 ## 手机侧开机脚本（★ 唯一一个，必须保留）
@@ -213,9 +220,12 @@ adb shell 'getprop ro.boot.slot_suffix; cat /proc/version'
 - **救机**：stock 已在 `boot_a` 时，只需 `fastboot set_active a` + reboot，**不用重刷**
 
 **镜像**（当前）：
-- **los102 基线**：`work/keep-los128-apatch-bbr/boot-Image-los102-apatch-bbr.img`
- （净版，md5 `85ab08c3…`；当前手机用 APatch 11282 重新打补丁后运行 #27）
-- **los101 回退**：`work/keep-los126-apatch-bbr/boot-Image-los126-apatch-bbr-APatch.img`（旧 APatch，md5 `a43083b5…`）
+- **los103 基线**：`work/keep-los129-apatch-bbr/boot-Image-los103-apatch-bbr.img`
+ （净版，md5 `c4b8171d…`；当前手机用 APatch 11282 打补丁后运行 #28）
+- **los103 已打 APatch 11282**：`work/keep-los129-apatch-bbr/boot-Image-los103-apatch-bbr-APatch11282.img`（md5 `e3aac555…`；AVB footer warning，但实测启动）
+- **los102 回退**：`work/keep-los128-apatch-bbr/boot-Image-los102-apatch-bbr.img`（md5 `85ab08c3…`）
+- **los101 回退**：`work/keep-los126-apatch-bbr/boot-Image-los126-apatch-bbr-APatch.img`（md5 `a43083b5…`）
+- **los102 刷前备份**：`work/backups/boot_a-los102-apatch11282-backup-20261019.img`（192MB，md5 `99d81c33…`）
 - **los101 刷前备份**：`work/backups/boot_a-los101-backup-20261019.img`（192MB，md5 `f48477ea…`）
 - **KSU 备份**：`work/backups/boot_a-los100-ksu-backup-20261019.img`（192MB，md5 `a0ae428e…`）
 - 原厂 GOLD：`~/mars/eng/builds/apatch-patched-boot-0.13.3.img`（md5 `8fcf3576…`）/
@@ -248,6 +258,6 @@ $S 'bash ~/mars-keep/2026-10-10-tmp-archive/scripts-mars/acceptance2.sh'   # 身
 $S 'adb shell "su -c /data/local/tmp/droidspaces check"'
 
 # 5) 派发新编译（本容器）
-scripts/dispatch-los102.sh main        # 或 apatch-bbr（los102 源码分支）
+scripts/dispatch-los103.sh main        # 或 apatch-bbr（los103 源码分支）
 nohup bash /tmp/losw/dl-run-all.sh <run_id> <tag> > /tmp/dl-<tag>.log 2>&1 &   # 产物拉取(临时脚本, 可选)
 ```

@@ -3,10 +3,19 @@
 > **los101 起默认 APatch**（BBR 基线），所以这份 shim 仍是容器 NAT 的必需项；
 > KernelSU v0.9.5 线仅历史/可选（KSU 内核走 `MARS-CLOSE-RANGE-436`，容器免 shim）。
 
-> TL;DR: **每新装/新导入一个容器 rootfs，都要装一次 `nr436-shim`**（它替换容器内的
-> `/sbin/init`）。不装 ⇒ 现代 systemd/glibc 发行版(Ubuntu/Debian/Fedora…)的服务**全部起不来**
+> TL;DR: **每新装/新导入一个容器 rootfs，都要装一次 `nr436-shim`**（它在 init 前装 seccomp 过滤器）。
+> 不装 ⇒ 现代 systemd/glibc 发行版(Ubuntu/Debian/Fedora…)的服务**全部起不来**
 > ⇒ 没有 DHCP ⇒ "NAT 模式网络不通"。busybox 系(alpine/openwrt)当前不装也能联网，
 > 但建议统一装上（容器内一旦跑 glibc 2.34+ 程序就会踩雷）。
+
+> **2026-10-19（Droidspaces 7.0）**：App 会在容器启动时把 `/sbin/init` 重置回 systemd 符号链，
+> 旧的“直接替换 `/sbin/init`”会被还原。systemd 容器现在用**持久位**：
+> `/lib/systemd/systemd` = shim，`/lib/systemd/systemd.real` = 真 systemd，
+> `/sbin/init.real -> /lib/systemd/systemd.real`；`/sbin/init -> /lib/systemd/systemd` 仍指向 shim。
+> `patches/nr436-shim-install.sh` 已自动按这个方式安装；`patches/nr436-shim` 是预编译 arm64 静态二进制。
+>
+> **Docker**：los103 已打开 `BRIDGE_NETFILTER`/`IP_SET*`/`NETFILTER_XT_MATCH_ADDRTYPE`/`NF_TABLES` 等，
+> `docker run --rm hello-world` 与 `alpine` bridge（172.17.0.2 → ping 1.1.1.1 0%）实测通过。
 
 ## 1. 为什么要装(根因,30 秒版)
 
