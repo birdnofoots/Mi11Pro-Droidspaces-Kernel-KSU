@@ -4,8 +4,8 @@
 
 > **权威文档**。每刷一个镜像加一行。证据等级：`[目]` 目视 / `[log]` logdump / `[adb]` / `[?]` 推断。
 
-> 🟢 **最新默认基线（2026-10-19）：`los102-apatch-bbr` —— APatch + BBR + IPv6 NAT。**
-> 基于 los101（los96 + BBR）+ IPv6 NAT；KernelSU v0.9.5 线转为历史/可选。详见文末 **§los102**。
+> 🟢 **最新默认基线（2026-10-19）：`los103-apatch-bbr` —— APatch + BBR + IPv6 NAT + Docker/nested。**
+> 基于 los102 + Docker/nested netfilter；KernelSU v0.9.5 线转为历史/可选。详见文末 **§los103**。
 
 ---
 
@@ -1905,3 +1905,76 @@ CONFIG_IP6_NF_TARGET_MASQUERADE=y
 
 **回退**：los101 boot 完整备份 `work/backups/boot_a-los101-backup-20261019.img`
 （md5 `f48477ea1201cd7534d66255d2677d39`）；KSU 备份 `a0ae428e…`；原厂+APatch GOLD `8fcf3576…`。
+
+---
+
+## ★★★★★★ 2026-10-19 **los103-apatch-bbr：los102 + Docker/nested（容器里再跑容器）**
+
+**目标（用户）**：容器里再支持容器（Docker），要“完全版 Linux 容器”；继续用最新 APatch 11282 patch。
+
+**起点**：los102 上 Docker 起不来，日志：
+```text
+failed to register "bridge" driver: iptables ... Couldn't load match `addrtype'
+```
+不是签名问题，是内核缺 netfilter match。Droidspaces 7.0 APK 的 DEX 里也列了完整所需项，按它补齐。
+
+**本版新增 config（全部 `=y`，CI 有断言）**：
+```text
+CONFIG_BRIDGE_NETFILTER=y
+CONFIG_CGROUP_NET_PRIO=y
+CONFIG_FW_LOADER_COMPRESS=y
+CONFIG_IP_SET=y
+CONFIG_IP_SET_HASH_IP=y
+CONFIG_IP_SET_HASH_NET=y
+CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+CONFIG_NETFILTER_XT_MATCH_RECENT=y
+CONFIG_NETFILTER_XT_SET=y
+CONFIG_NETFILTER_XT_TARGET_LOG=y
+CONFIG_NF_TABLES=y
+CONFIG_TMPFS_POSIX_ACL=y
+CONFIG_TMPFS_XATTR=y
+```
+**仍然不开**：`CONFIG_MACVLAN`（用户不用 `--net=m`）、`CONFIG_CFS_BANDWIDTH`（用户不要 CPU 限制）。
+（`FAIR_GROUP_SCHED` 也保持关；Docker 默认 bridge 不需要。）
+
+**CI**：run `39182702193` success；artifact `los-kernel-129`；head `3d9b240`。
+- Image：44,083,712 B，md5 `d46f0c1b3cc28df11018ceb7843f1478`
+- 净版 boot：64,442,368 B，md5 `c4b8171dab6c64d1b6917fd53dcb535e`
+- APatch 11282 打补丁后：64,741,330 B，md5 `e3aac555ffe007e3f99d49d6f552320e`
+- 配置内嵌校验：BBR/IPv6 NAT/addrtype/IP_SET/NF_TABLES 全 y；`CONFIG_KSU` 不存在；`strings Image | grep -c KernelSU`=0。
+
+**真机验收（#28）**：
+| 项 | 结果 |
+|---|---|
+| 内核 | `5.4.242-qgki-gbb70cde46897` `#28` `Mon Oct 19 01:05:03 UTC 2026`（runner@） |
+| BBR | `tcp_congestion_control=bbr` |
+| IPv6 NAT | `IP6_NF_NAT=y` / `IP6_NF_TARGET_MASQUERADE=y` |
+| 容器 systemd | `systemctl is-system-running=running`（Docker 不再 failed） |
+| Docker | `docker run --rm hello-world` ✅（arm64v8，走国内加速） |
+| 嵌套网络 | `docker run --rm alpine` bridge `172.17.0.2` → ping `1.1.1.1` **0% loss** ✅ |
+| APatch root | `u:r:magisk:s0`、`apd` 正常 |
+
+**APatch 11282 patch 注意**：64MB boot + 更大内核（44,083,712 B）时，新版 `kptools` 会打印
+`Tail no longer fits ... no room for the AVB footer`，但 `new-boot.img` 仍生成；**解锁 bootloader
+（orange / flash.locked=0）下实测能正常启动**。`boot_a` 回读 md5 与 `new-boot.img` 一致。
+
+**nr436-shim 长期位（Droidspaces 7.0 适配）**：
+- 7.0 会在容器启动时把 `/sbin/init` 恢复成 systemd 符号链，旧的“直接替换 `/sbin/init`”会被还原。
+- 新方案：`/lib/systemd/systemd` = shim；`/lib/systemd/systemd.real` = 真 systemd；
+  `/sbin/init.real -> /lib/systemd/systemd.real`；`/sbin/init -> /lib/systemd/systemd`（shim）。
+- 重启容器后实测：shim 仍在、`eth0=172.28.1.2`、networkd active、Docker 正常。
+- `patches/nr436-shim-install.sh` 已改成这个持久位；`patches/nr436-shim` 为预编译 arm64 静态二进制。
+  Droidspaces 7.0 重建容器时重跑一次安装器即可。
+
+**国内源**：
+- ubuntu 22.04 arm64 apt：`/etc/apt/sources.list` 全部换 `http://mirrors.aliyun.com/ubuntu-ports/`
+  （jammy/main/updates/backports/security；删除无用的 amd64 `archive.ubuntu.com` 行）。
+  备份 `/etc/apt/sources.list.bak-20261019-003757`；`apt-get update` rc=0，无签名错误。
+- Docker registry 加速：`/etc/docker/daemon.json` =
+  `{"registry-mirrors":["https://docker.1panel.live","https://docker.xuanyuan.me"]}`；
+  `docker.1panel.live` 实测可拉 hello-world/alpine。
+
+**Release/tag**：`los103-apatch-bbr`。公开资产只放净版 boot；APatch-patched boot 含个人 superkey，本地保留。
+
+**回退**：los102 `work/keep-los128-apatch-bbr/`（boot md5 `85ab08c3…`）；los101 `work/keep-los126-apatch-bbr/`；
+los102 刷前备份 `work/backups/boot_a-los102-apatch11282-backup-20261019.img`（md5 `99d81c33…`）。

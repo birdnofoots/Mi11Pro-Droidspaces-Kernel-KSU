@@ -5,10 +5,11 @@
 
 ---
 
-## 🎉 当前基线（2026-10-19）：**los102-apatch-bbr** —— APatch + BBR + IPv6 NAT
+## 🎉 当前基线（2026-10-19）：**los103-apatch-bbr** —— APatch + BBR + IPv6 NAT + Docker/nested
 
-> **默认基线**：APatch root + BBR + **IPv6 NAT**。内核 = **los101**（los96 + BBR）再加
-> `CONFIG_IP6_NF_NAT` / `CONFIG_IP6_NF_TARGET_MASQUERADE`（Droidspaces 7.0 检查项）。
+> **默认基线**：APatch root + BBR + **IPv6 NAT** + **容器内 Docker/nested**。内核 = los102 再加
+> `BRIDGE_NETFILTER` / `IP_SET` / `NETFILTER_XT_MATCH_ADDRTYPE` / `RECENT` / `XT_SET` / `XT_TARGET_LOG` /
+> `NF_TABLES` / `TMPFS_XATTR` 等（Droidspaces 7 完整 netfilter/cgroup 集）。
 > **KernelSU v0.9.5 线保留为历史/可选，不再默认**（非 GKI 上限就停在 v0.9.5，已切回 APatch）。
 
 | 能力 | 状态 |
@@ -18,6 +19,7 @@
 | 音频出声（声卡注册 + tinyplay/框架播放） | ✅（los96 验收，los101 沿用） |
 | **BBR**（`TCP_CONG_BBR=y` + 默认 `bbr` + `NET_SCH_FQ=y`） | ✅（真机 `tcp_congestion_control=bbr`） |
 | **IPv6 NAT**（`IP6_NF_NAT=y` + `IP6_NF_TARGET_MASQUERADE=y`） | ✅（Droidspaces 7.0 检查通过） |
+| **容器内 Docker/nested**（bridge/NAT/overlayfs） | ✅（hello-world + alpine bridge 172.17.0.2 ping 1.1.1.1 0%） |
 | Macvlan / CPU limit（`MACVLAN` / `CFS_BANDWIDTH`） | 按用户要求**不开**（黄色 X 可忽略） |
 | APatch root（`u:r:magisk:s0`，`apd`） | ✅ |
 | Droidspaces 容器（`droidspaces check` required 全过） | ✅ |
@@ -25,7 +27,7 @@
 ### 📸 真机截图（硬件状态延续；原图在 [`docs/screenshots/`](docs/screenshots)）
 
 > 2026-10-12 los96 刷入验收后拍摄（Droidspaces App ×4 + APatch root 管理 ×2），
-> 另附 2026-10-11 一张作对照。los102 为同一硬件栈 + BBR + IPv6 NAT。
+> 另附 2026-10-11 一张作对照。los103 为同一硬件栈 + BBR + IPv6 NAT + Docker/nested。
 
 | | |
 |---|---|
@@ -38,19 +40,19 @@
 | <img src="docs/screenshots/droidspaces-2026-10-11.jpg" width="270"> | |
 | *Droidspaces App · 10-11（对照）* | |
 
-**直接使用**：下载 [Release `los102-apatch-bbr`](../../releases/tag/los102-apatch-bbr) 里的
-`boot-Image-los102-apatch-bbr.img` + `99-wlan-mars.sh`，按 [`docs/FLASH-GUIDE.md`](docs/FLASH-GUIDE.md) 刷入。
-md5：`boot-Image-los102-apatch-bbr.img` = `85ab08c30055b37bf38f47bfc900403f`；
-`Image-los102-apatch-bbr` = `117622f86ba636934255ab0433e47fdf`。
+**直接使用**：下载 [Release `los103-apatch-bbr`](../../releases/tag/los103-apatch-bbr) 里的
+`boot-Image-los103-apatch-bbr.img` + `99-wlan-mars.sh`，按 [`docs/FLASH-GUIDE.md`](docs/FLASH-GUIDE.md) 刷入。
+md5：`boot-Image-los103-apatch-bbr.img` = `c4b8171dab6c64d1b6917fd53dcb535e`；
+`Image-los103-apatch-bbr` = `d46f0c1b3cc28df11018ceb7843f1478`。
 ⚠️ **镜像是净版（未打 root 补丁）**：刷前先用 APatch App“选择并修补一个文件”打补丁（或走
 `flash-local.sh` 自动打），否则没有 root ⇒ `/data/adb/service.d/99-wlan-mars.sh` 不执行 ⇒ 无自动 WiFi。
 **root 方案**：默认/基线 = **APatch**（容器需 `nr436-shim`）；**KernelSU v0.9.5 仅历史/可选**，不再默认。
-**BBR / IPv6 NAT 自检**：
+**BBR / IPv6 NAT / Docker 自检**：
 
 ```bash
-adb shell 'zcat /proc/config.gz | grep -E "TCP_CONG_BBR|DEFAULT_TCP_CONG|IP6_NF_NAT|IP6_NF_TARGET_MASQUERADE"; \
+adb shell 'zcat /proc/config.gz | grep -E "TCP_CONG_BBR|DEFAULT_TCP_CONG|IP6_NF_NAT|IP6_NF_TARGET_MASQUERADE|NETFILTER_XT_MATCH_ADDRTYPE|IP_SET|NF_TABLES"; \
            cat /proc/sys/net/ipv4/tcp_congestion_control'
-# 期望: =y / "bbr" / =y / =y；运行时 bbr
+# 期望: =y / "bbr" / =y / =y / =y / =y / =y；运行时 bbr
 ```
 
 **文档索引**：
@@ -121,8 +123,11 @@ python3 /tmp/ghdisp2.py los.yml '{"config":"mars_factory.config","logdump":"1","
   `NET_SCH_FQ=y`，并把 `DEFAULT_TCP_CONG` 设为 `bbr`；不加标记 = 无 BBR（IPv6 NAT 仍随基线）。
 - **IPv6 NAT**：`configs/mars_factory.config` 已含 `CONFIG_IP6_NF_NAT=y` +
   `CONFIG_IP6_NF_TARGET_MASQUERADE=y`，CI 在 config 步断言。
+- **Docker/nested**：`BRIDGE_NETFILTER`、`IP_SET`/`IP_SET_HASH_IP`/`IP_SET_HASH_NET`、
+  `NETFILTER_XT_MATCH_ADDRTYPE`/`RECENT`、`NETFILTER_XT_SET`、`NETFILTER_XT_TARGET_LOG`、
+  `NF_TABLES`、`TMPFS_XATTR`/`POSIX_ACL`、`CGROUP_NET_PRIO` 已开，CI 断言。
   **Macvlan / CFS_BANDWIDTH 按用户要求不开**。
-- **root**：不加 `KSU` 标记 = APatch 内核（当前默认，run `39177932470` / `los102-apatch-bbr`）；
+- **root**：不加 `KSU` 标记 = APatch 内核（当前默认，run `39182702193` / `los103-apatch-bbr`）；
   加 `KSU` 才是历史 KernelSU v0.9.5 线。
 - 历史工作流 `build.yml`（早期 5.4.191 上游树方案）仅作存档
 
