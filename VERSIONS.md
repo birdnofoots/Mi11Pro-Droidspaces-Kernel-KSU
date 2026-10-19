@@ -4,8 +4,8 @@
 
 > **权威文档**。每刷一个镜像加一行。证据等级：`[目]` 目视 / `[log]` logdump / `[adb]` / `[?]` 推断。
 
-> 🟢 **最新默认基线（2026-10-19）：`los101-apatch-bbr` —— APatch + BBR。**
-> 基于 los96（APatch 最后成功版）+ BBR；KernelSU v0.9.5 线转为历史/可选。详见文末 **§los101**。
+> 🟢 **最新默认基线（2026-10-19）：`los102-apatch-bbr` —— APatch + BBR + IPv6 NAT。**
+> 基于 los101（los96 + BBR）+ IPv6 NAT；KernelSU v0.9.5 线转为历史/可选。详见文末 **§los102**。
 
 ---
 
