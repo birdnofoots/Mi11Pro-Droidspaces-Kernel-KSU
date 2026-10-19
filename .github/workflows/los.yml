@@ -259,7 +259,7 @@ jobs:
             grep -q "^CONFIG_$k=y" out/.config || { echo "::error::Docker/nested: $k 不是 y"; fail=1; }
           done
           # USB WiFi（los104）：ath9k_htc / rt2800usb / rt73usb / rtl8187 / rtl8xxxu / mt7601u / carl9170
-          for k in ATH9K_HTC CARL9170 RT2X00 RT2800USB RT73USB RTL8187 RTL8XXXU MT7601U EEPROM_93CX6 CRC_ITU_T; do
+          for k in ATH9K_HTC CARL9170 RT2X00 RT2800USB RT2800USB_RT53XX RT2800USB_RT55XX RT2800USB_RT3573 RT2800USB_UNKNOWN RT73USB RTL8187 RTL8XXXU RTL8XXXU_UNTESTED MT7601U EEPROM_93CX6 CRC_ITU_T; do
             grep -q "^CONFIG_$k=y" out/.config || { echo "::error::USB WiFi: $k 不是 y"; fail=1; }
           done
           for k in CFI_CLANG LTO_CLANG THINLTO; do
