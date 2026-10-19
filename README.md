@@ -5,11 +5,11 @@
 
 ---
 
-## 🎉 当前基线（2026-10-19）：**los101-apatch-bbr** —— APatch + BBR
+## 🎉 当前基线（2026-10-19）：**los102-apatch-bbr** —— APatch + BBR + IPv6 NAT
 
-> **新的默认基线**：APatch root + BBR。内核基线 = **los96**（APatch 最后成功版，run `38245465726`），
-> 只加 BBR 开关（`extra_config` 末尾加 `BBR` 标记）。**KernelSU v0.9.5 线保留为历史/可选，不再默认**
-> （非 GKI 上限就停在 v0.9.5，已切回 APatch）。
+> **默认基线**：APatch root + BBR + **IPv6 NAT**。内核 = **los101**（los96 + BBR）再加
+> `CONFIG_IP6_NF_NAT` / `CONFIG_IP6_NF_TARGET_MASQUERADE`（Droidspaces 7.0 检查项）。
+> **KernelSU v0.9.5 线保留为历史/可选，不再默认**（非 GKI 上限就停在 v0.9.5，已切回 APatch）。
 
 | 能力 | 状态 |
 |---|---|
@@ -17,13 +17,15 @@
 | WiFi（原厂 WLAN 栈 + `99-wlan-mars.sh`） | ✅（实测 `192.168.43.246`） |
 | 音频出声（声卡注册 + tinyplay/框架播放） | ✅（los96 验收，los101 沿用） |
 | **BBR**（`TCP_CONG_BBR=y` + 默认 `bbr` + `NET_SCH_FQ=y`） | ✅（真机 `tcp_congestion_control=bbr`） |
+| **IPv6 NAT**（`IP6_NF_NAT=y` + `IP6_NF_TARGET_MASQUERADE=y`） | ✅（Droidspaces 7.0 检查通过） |
+| Macvlan / CPU limit（`MACVLAN` / `CFS_BANDWIDTH`） | 按用户要求**不开**（黄色 X 可忽略） |
 | APatch root（`u:r:magisk:s0`，`apd`） | ✅ |
 | Droidspaces 容器（`droidspaces check` required 全过） | ✅ |
 
 ### 📸 真机截图（硬件状态延续；原图在 [`docs/screenshots/`](docs/screenshots)）
 
 > 2026-10-12 los96 刷入验收后拍摄（Droidspaces App ×4 + APatch root 管理 ×2），
-> 另附 2026-10-11 一张作对照。los101 为同一硬件栈 + BBR。
+> 另附 2026-10-11 一张作对照。los102 为同一硬件栈 + BBR + IPv6 NAT。
 
 | | |
 |---|---|
@@ -36,19 +38,19 @@
 | <img src="docs/screenshots/droidspaces-2026-10-11.jpg" width="270"> | |
 | *Droidspaces App · 10-11（对照）* | |
 
-**直接使用**：下载 [Release `los101-apatch-bbr`](../../releases/tag/los101-apatch-bbr) 里的
-`boot-Image-los101-apatch-bbr.img` + `99-wlan-mars.sh`，按 [`docs/FLASH-GUIDE.md`](docs/FLASH-GUIDE.md) 刷入。
-md5：`boot-Image-los101-apatch-bbr.img` = `f0c43b9970adee2a63ccf9b3c9d70142`；
-`Image-los101-apatch-bbr` = `b10a6a1c0cf365aef30fcfc90a612593`。
+**直接使用**：下载 [Release `los102-apatch-bbr`](../../releases/tag/los102-apatch-bbr) 里的
+`boot-Image-los102-apatch-bbr.img` + `99-wlan-mars.sh`，按 [`docs/FLASH-GUIDE.md`](docs/FLASH-GUIDE.md) 刷入。
+md5：`boot-Image-los102-apatch-bbr.img` = `85ab08c30055b37bf38f47bfc900403f`；
+`Image-los102-apatch-bbr` = `117622f86ba636934255ab0433e47fdf`。
 ⚠️ **镜像是净版（未打 root 补丁）**：刷前先用 APatch App“选择并修补一个文件”打补丁（或走
 `flash-local.sh` 自动打），否则没有 root ⇒ `/data/adb/service.d/99-wlan-mars.sh` 不执行 ⇒ 无自动 WiFi。
 **root 方案**：默认/基线 = **APatch**（容器需 `nr436-shim`）；**KernelSU v0.9.5 仅历史/可选**，不再默认。
-**BBR 自检**：
+**BBR / IPv6 NAT 自检**：
 
 ```bash
-adb shell 'zcat /proc/config.gz | grep -E "TCP_CONG_ADVANCED|TCP_CONG_BBR|DEFAULT_TCP_CONG|NET_SCH_FQ"; \
+adb shell 'zcat /proc/config.gz | grep -E "TCP_CONG_BBR|DEFAULT_TCP_CONG|IP6_NF_NAT|IP6_NF_TARGET_MASQUERADE"; \
            cat /proc/sys/net/ipv4/tcp_congestion_control'
-# 期望: =y / =y / "bbr" / =y；运行时 bbr
+# 期望: =y / "bbr" / =y / =y；运行时 bbr
 ```
 
 **文档索引**：
@@ -116,8 +118,11 @@ python3 /tmp/ghdisp2.py los.yml '{"config":"mars_factory.config","logdump":"1","
 - 基线：LineageOS `android_kernel_xiaomi_sm8350@d42d2eb6c`（5.4.242）
 - 真机原厂 config：`configs/mars_factory.config`；产物带 `ignore_vermagic` + MIUI 符号桩
 - **BBR**：`extra_config` 末尾的 `BBR` 标记会打开 `TCP_CONG_ADVANCED=y`、`TCP_CONG_BBR=y`、
-  `NET_SCH_FQ=y`，并把 `DEFAULT_TCP_CONG` 设为 `bbr`；不加标记 = los96 原样（BBR 关）。
-- **root**：不加 `KSU` 标记 = APatch 内核（当前默认，run `39174084270` / `los101-apatch-bbr`）；
+  `NET_SCH_FQ=y`，并把 `DEFAULT_TCP_CONG` 设为 `bbr`；不加标记 = 无 BBR（IPv6 NAT 仍随基线）。
+- **IPv6 NAT**：`configs/mars_factory.config` 已含 `CONFIG_IP6_NF_NAT=y` +
+  `CONFIG_IP6_NF_TARGET_MASQUERADE=y`，CI 在 config 步断言。
+  **Macvlan / CFS_BANDWIDTH 按用户要求不开**。
+- **root**：不加 `KSU` 标记 = APatch 内核（当前默认，run `39177932470` / `los102-apatch-bbr`）；
   加 `KSU` 才是历史 KernelSU v0.9.5 线。
 - 历史工作流 `build.yml`（早期 5.4.191 上游树方案）仅作存档
 
