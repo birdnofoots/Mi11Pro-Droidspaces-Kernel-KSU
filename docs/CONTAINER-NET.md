@@ -17,6 +17,12 @@
 > **Docker**：los103 已打开 `BRIDGE_NETFILTER`/`IP_SET*`/`NETFILTER_XT_MATCH_ADDRTYPE`/`NF_TABLES` 等，
 > `docker run --rm hello-world` 与 `alpine` bridge（172.17.0.2 → ping 1.1.1.1 0%）实测通过。
 
+> **systemd ≥ 260 的镜像在 5.4 内核上起不来**（实测 Kali 2026.3 = systemd 262）：
+> systemd 260 起用 `STATX_ATTR_MOUNT_ROOT`（内核 6.8+）判断挂载点，5.4 没有该属性 ⇒
+> `Failed to mount API filesystems` → `Exiting PID 1` ⇒ 容器启动约 0.3s 后退出。
+> 这不是 436/shim 的问题，**shim 修不了**。请用 systemd ≤259 的镜像（Kali 2025.x、Ubuntu 24.04、
+> Debian 13 等），或 `--init=/bin/bash` 临时进容器（网络需手动 `ip addr add 172.28.1.x/16 ...`）。
+
 ## 1. 为什么要装(根因,30 秒版)
 
 - 手机是 **APatch root**：刷机时 KernelPatch(bmax121) 往内核注入隐藏系统调用 **supercall**，
@@ -72,7 +78,9 @@ adb shell 'su -c "droidspaces --name=<容器名> run /bin/sh -c \"\
 - **容器里看不到 `/storage/emulated/0/`**（openwrt 默认 `enable_android_storage=0`）：
   两种解法任选：① container.config 里 `enable_android_storage=1` 后重启容器再装；
   ② 用 stdin 灌二进制：`adb shell "su -c 'droidspaces --name=X run /bin/sh -c \"cat > /sbin/nr436-shim\"'" < nr436-shim`。
-- **容器已经起不来（比如 shim 半装状态）**：用 `--init` 覆盖救活再修：
+- **容器已经起不来（比如 shim 半装状态）**：`nr436-shim-install.sh` 现在会自动走**离线模式**
+  （停容器 → loop 挂载 `rootfs.img` → 装 shim → 卸载），不需要容器能跑；
+  也可用 `--init` 覆盖救活再修：
   `droidspaces --name=X --init=/sbin/init.real start`（或 `--init=/bin/busybox`），
   进去把 `/sbin/init` 补好，再正常重启。
 - **卸载**：容器内 `mv /sbin/init.real /sbin/init` 即还原。

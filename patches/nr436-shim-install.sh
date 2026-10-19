@@ -24,8 +24,39 @@ grep -q '^enable_android_storage=1' "$CFG" || {
   echo "[i] 已开 enable_android_storage(装完可改回)"
 }
 
-# 2) 确保容器在跑(挂载 rootfs) —— 一律走 droidspaces 自己的挂载, 绝不手动 loop 挂载
+# 2) 确保容器在跑(挂载 rootfs)
 $DS show 2>/dev/null | grep -q "| $NAME " || { $DS start -n $NAME >/dev/null 2>&1; sleep 12; }
+
+# 2b) 容器起不来(例如 systemd 太新/init 直接退出)时, 直接 loop 挂载 rootfs.img 离线安装
+if ! $DS show 2>/dev/null | grep -q "| $NAME "; then
+  IMG=/data/local/Droidspaces/Containers/$NAME/rootfs.img
+  MNT=/data/local/tmp/ds-$NAME-mnt
+  [ -f "$IMG" ] || { echo "[x] 容器没起来且找不到 rootfs.img: $IMG"; exit 2; }
+  echo "[i] 容器未运行 -> 离线模式(loop 挂载 rootfs.img)"
+  mkdir -p "$MNT"
+  mountpoint -q "$MNT" && umount "$MNT"
+  mount -o loop,rw "$IMG" "$MNT" || { echo "[x] loop 挂载失败"; exit 2; }
+  if [ -e "$MNT/lib/systemd/systemd.real" ]; then
+    echo "[=] 已装(systemd 持久位), 跳过"
+  elif [ -x "$MNT/lib/systemd/systemd" ] && [ ! -L "$MNT/lib/systemd/systemd" ]; then
+    cp -a "$MNT/lib/systemd/systemd" "$MNT/lib/systemd/systemd.real"
+    cp -f /sdcard/nr436-shim "$MNT/lib/systemd/systemd"
+    chmod 755 "$MNT/lib/systemd/systemd"
+    ln -sfn /lib/systemd/systemd.real "$MNT/sbin/init.real"
+    echo "[+] 离线安装: /lib/systemd/systemd=shim -> /lib/systemd/systemd.real"
+  elif [ -e "$MNT/sbin/init" ]; then
+    mv "$MNT/sbin/init" "$MNT/sbin/init.real"
+    cp -f /sdcard/nr436-shim "$MNT/sbin/init"
+    chmod 755 "$MNT/sbin/init"
+    echo "[+] 离线安装: /sbin/init=shim -> /sbin/init.real"
+  else
+    echo "[x] rootfs 里找不到 init"; sync; umount "$MNT"; exit 2
+  fi
+  sync
+  umount "$MNT"
+  echo "[i] 离线安装完成；容器能起来后 shim 才会生效 (systemd >= 260 需换旧镜像)"
+  exit 0
+fi
 
 # 3) 容器内安装(幂等; systemd 用持久位, 其它用 /sbin/init)
 $DS --name=$NAME run /bin/sh -c '
