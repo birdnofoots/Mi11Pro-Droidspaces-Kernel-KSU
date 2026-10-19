@@ -4,8 +4,9 @@
 
 > **权威文档**。每刷一个镜像加一行。证据等级：`[目]` 目视 / `[log]` logdump / `[adb]` / `[?]` 推断。
 
-> 🟢 **最新默认基线（2026-10-19）：`los103-apatch-bbr` —— APatch + BBR + IPv6 NAT + Docker/nested。**
-> 基于 los102 + Docker/nested netfilter；KernelSU v0.9.5 线转为历史/可选。详见文末 **§los103**。
+> 🟢 **最新默认基线（2026-10-19）：`los104-apatch-bbr` —— APatch + BBR + IPv6 NAT + Docker/nested + USB WiFi。**
+> 基于 los103 + USB WiFi（ath9k_htc/carl9170/rt2800usb/rt73usb/rtl8187/rtl8xxxu/mt7601u + 固件内建）；
+> KernelSU v0.9.5 线转为历史/可选。详见文末 **§los104**。
 
 ---
 
@@ -1978,3 +1979,52 @@ CONFIG_TMPFS_XATTR=y
 
 **回退**：los102 `work/keep-los128-apatch-bbr/`（boot md5 `85ab08c3…`）；los101 `work/keep-los126-apatch-bbr/`；
 los102 刷前备份 `work/backups/boot_a-los102-apatch11282-backup-20261019.img`（md5 `99d81c33…`）。
+
+---
+
+## ★★★★★★ 2026-10-19 **los104-apatch-bbr：los103 + USB WiFi（驱动内建 + 固件内建）**
+
+**目标**：给 mars 加 USB WiFi 支持，并和 OP12P（SM8650/6.1）选同一颗设备，只买一次硬件。
+
+**改动**（`gh/configs/mars_factory.config`）：
+- ath：`WLAN_VENDOR_ATH=y`、`ATH9K_HTC=y`、`CARL9170=y`
+- ralink：`WLAN_VENDOR_RALINK=y`、`RT2X00=y`、`RT2800USB=y`、`RT2800USB_RT33XX/RT35XX/RT3573/RT53XX/RT55XX/UNKNOWN=y`、`RT73USB=y`
+- realtek：`WLAN_VENDOR_REALTEK=y`、`RTL8187=y`、`RTL8XXXU=y`、`RTL8XXXU_UNTESTED=y`
+- mediatek：`WLAN_VENDOR_MEDIATEK=y`、`MT7601U=y`
+- 依赖：`EEPROM_93CX6=y`、`CRC_ITU_T=y`
+
+⚠️ 第一次 los104 构建漏了 `RT2800USB_RT53XX`，RT5370（最常见的便宜卡）会不认；已补 `RT53XX/RT55XX/RT3573/UNKNOWN`
+与 `RTL8XXXU_UNTESTED` 重编（head `a5e4dd6`）。
+
+**固件内建**（`gh/firmware/` → workflow `cp -a firmware/. kernel/firmware/` + `EXTRA_FIRMWARE`）：
+`ath9k_htc/htc_7010-1.4.0.fw`、`ath9k_htc/htc_9271-1.4.0.fw`、`carl9170-1.fw`、`rt2870.bin`、`rt73.bin`、
+`rtlwifi/rtl8188efw.bin`、`rtlwifi/rtl8192cufw.bin`、`mt7601u.bin`
+（`RTL8188EU/RTL8192CU` 实际以 `rtl8xxxu` 内建驱动为主，固件随内核走）。
+
+**CI**：run `39189264577` success；artifact `los-kernel-131`；head `a5e4dd6`。
+- Image：45,572,608 B，md5 `49439b2c4953460b33b00783e6e31d74`
+- 净版 boot：65,933,312 B，md5 `0989885574e1cab230b5875004e46db8`
+- modules：md5 `d0cfdcdb0422468c3fb2daef1d0b1e39`；config-last.gz `2670cfc6182391650523d790095c8698`；
+  System.map `3b1dfc42e96110c24889cadc92850cb3`
+
+**真机验收（#30）**：
+| 项 | 结果 |
+|---|---|
+| 内核 | `5.4.242-qgki-gbb70cde46897` `#30` `Mon Oct 19 02:33:23 UTC 2026`（runner@） |
+| BBR | `tcp_congestion_control=bbr` |
+| IPv6 NAT | `IP6_NF_NAT=y` / `IP6_NF_TARGET_MASQUERADE=y` |
+| Docker/nested | hello-world ✅；alpine bridge `172.17.0.2` ping 外网 0% ✅ |
+| USB WiFi 驱动 | `ath9k_htc` `carl9170` `mt7601u` `rt2800usb` `rt73usb` `rtl8187` `rtl8xxxu` 全部 registered |
+| 固件 | 已随内核内建，无 `/vendor/firmware` 依赖，插卡即用 |
+| APatch root | 11282 打补丁后启动，`u:r:magisk:s0`、`apd` 正常 |
+
+**选型结论**（详见 `docs/USB-WIFI.md`）：首选 **AR9271**（`ath9k_htc`，2.4G，最稳）；
+性价比 **RT5370**（`rt2800usb` + `RT53XX`）；要双频 5GHz 选 **RT5572**（`RT55XX`）。
+**RTL8812AU 不要买**：树外驱动，两套内核都没编。
+
+**Release/tag**：`los104-apatch-bbr`。公开资产只放净版 boot + Image + modules + config/System.map；
+APatch-patched boot 含个人 superkey，本地保留、不入库。
+
+**回退**：los103 `work/keep-los129-apatch-bbr/`（含已打 APatch 11282 的 boot `e3aac555…`）；
+los102 `work/keep-los128-apatch-bbr/`；los101 `work/keep-los126-apatch-bbr/`。
+刷前备份 `work/backups/boot_a-los102-apatch11282-backup-20261019.img`（md5 `99d81c33…`）。
