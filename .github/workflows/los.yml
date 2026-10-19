@@ -258,6 +258,10 @@ jobs:
                    NETFILTER_XT_SET NETFILTER_XT_TARGET_LOG NF_TABLES TMPFS_POSIX_ACL TMPFS_XATTR; do
             grep -q "^CONFIG_$k=y" out/.config || { echo "::error::Docker/nested: $k 不是 y"; fail=1; }
           done
+          # USB WiFi（los104）：ath9k_htc / rt2800usb / rt73usb / rtl8187 / rtl8xxxu / mt7601u / carl9170
+          for k in ATH9K_HTC CARL9170 RT2X00 RT2800USB RT73USB RTL8187 RTL8XXXU MT7601U EEPROM_93CX6 CRC_ITU_T; do
+            grep -q "^CONFIG_$k=y" out/.config || { echo "::error::USB WiFi: $k 不是 y"; fail=1; }
+          done
           for k in CFI_CLANG LTO_CLANG THINLTO; do
             # 老树(5.4.233)可能不支持 CFI/LTO: 只告警不失败(只影响代码生成, 不影响 ABI)
             grep -q "^CONFIG_$k=y" out/.config || echo "::warning::$k 未启用(该树可能不支持), 继续"
@@ -376,9 +380,9 @@ jobs:
         if: github.event.inputs.firmware_embed == '1'
         run: |
           set -e
-          FW="a660_gmu.bin a660_sqe.fw a660_zap.b00 a660_zap.b01 a660_zap.b02 a660_zap.mdt st_fts_k2.ftb st_fts_k2_htp.ftb stm_fts_production_limits.csv aw8697_haptic.bin ipa_fws.mdt ipa_fws.b00 ipa_fws.b01 ipa_fws.b02 ipa_fws.b03 ipa_fws.b04"
+          FW="a660_gmu.bin a660_sqe.fw a660_zap.b00 a660_zap.b01 a660_zap.b02 a660_zap.mdt st_fts_k2.ftb st_fts_k2_htp.ftb stm_fts_production_limits.csv aw8697_haptic.bin ipa_fws.mdt ipa_fws.b00 ipa_fws.b01 ipa_fws.b02 ipa_fws.b03 ipa_fws.b04 ath9k_htc/htc_7010-1.4.0.fw ath9k_htc/htc_9271-1.4.0.fw carl9170-1.fw rt2870.bin rt73.bin mt7601u.bin rtlwifi/rtl8188efw.bin rtlwifi/rtl8192cufw.bin"
           mkdir -p kernel/firmware
-          cp -f firmware/* kernel/firmware/
+          cp -a firmware/. kernel/firmware/
           echo "--- 待内建固件 ---"; ls -l kernel/firmware | head -20
           cd kernel
           for f in $FW; do [ -s "firmware/$f" ] || { echo "::error::缺固件 $f"; exit 1; }; done
