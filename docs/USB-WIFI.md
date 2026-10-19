@@ -1,5 +1,8 @@
 # USB WiFi（OP12P / mars 双机兼容）— 选型与集成说明
 
+> 买卡/到货验收清单见 **[`USB-WIFI-CARDS.md`](USB-WIFI-CARDS.md)**（5 张推荐型号、VID:PID 核对、5GHz/监听验收、退货判据）。
+
+
 > 目标：买**一个** USB WiFi 网卡，OP12P（SM8650 / 6.1.141）和 mars（SM8350 / 5.4.242）都能用。
 > 结论：**AR9271（ath9k_htc）首选**；**RT5370（rt2800usb）** 是便宜的备选；要 5GHz 选 **RT5572（RT55XX）**。
 > 下面这些驱动两边内核都支持，mars 已内建，OP12P 已按模块 + 固件打包。
