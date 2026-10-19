@@ -1,17 +1,22 @@
-# mars 内核刷机指南（2026-10-19 更新 · **los101-apatch-bbr**，APatch + BBR）
+# mars 内核刷机指南（2026-10-19 更新 · **los102-apatch-bbr**，APatch + BBR + IPv6 NAT）
 
 > 本文是**唯一权威刷机文档**（旧版 `docs-flash-guide.md` 已改为指针）。
-> **当前默认基线 = `los101-apatch-bbr`**（Release 同名），历史镜像（los96/los100-ksu/P3）同理。
+> **当前默认基线 = `los102-apatch-bbr`**（Release 同名），历史镜像（los101/los96/los100-ksu/P3）同理。
 
 ---
 
-## ★ los101 变更（2026-10-19）
+> ⚠️ 本 tag `los102-apatch-bbr` 是**纯 APatch**：不含 KSU 整合步骤 / `MARS-CLOSE-RANGE-436`；
+> KSU/close-range 说明见 main 历史分支。容器 shim 源码在本 tag `patches/nr436-shim*`。
 
-- 基线 = **los96**（APatch 最后成功版）+ **BBR 开关**，没有 KSU 期改动。
+## ★ los102 变更（2026-10-19）
+
+- 基线 = **los101**（los96 + BBR）+ **IPv6 NAT**；没有 KSU 期改动。
 - **BBR 默认开启**：`CONFIG_TCP_CONG_BBR=y`、`CONFIG_DEFAULT_TCP_CONG="bbr"`、`CONFIG_NET_SCH_FQ=y`；
   真机 `/proc/sys/net/ipv4/tcp_congestion_control` = `bbr`。
+- **IPv6 NAT 开启**：`CONFIG_IP6_NF_NAT=y`、`CONFIG_IP6_NF_TARGET_MASQUERADE=y`
+  （Droidspaces 7.0 检查 ✅；Macvlan / CFS_BANDWIDTH **按用户要求不开**）。
 - **root 默认 = APatch**；KernelSU v0.9.5 线转为**历史/可选**（非 GKI 上限就是 v0.9.5）。
-- 镜像：净版 boot `boot-Image-los101-apatch-bbr.img`（md5 `f0c43b99…`）；
+- 镜像：净版 boot `boot-Image-los102-apatch-bbr.img`（md5 `85ab08c3…`）；
   APatch 打补丁后再刷（见 §0/§4）。BBR 自检：
 
 ```bash
@@ -62,7 +67,7 @@ adb shell 'zcat /proc/config.gz | grep -E "TCP_CONG_BBR|DEFAULT_TCP_CONG|NET_SCH
 
 ---
 
-## 0. 快速通道（推荐）：刷 Release 的 **los101-apatch-bbr**
+## 0. 快速通道（推荐）：刷 Release 的 **los102-apatch-bbr**
 
 ```bash
 # 0) 手机连电脑（USB 或 WiFi adb），确认设备
@@ -71,12 +76,12 @@ adb devices
 #       留 USB 单通道，否则裸 adb 命令会报 "more than one device"
 
 # 1) ★先打 root 补丁，再刷（净版镜像直接刷会丢 root ⇒ 开机脚本不跑 ⇒ 没 WiFi！）
-#    Release 里的 boot-Image-los101-apatch-bbr.img 是"净版"（未打 root 补丁）。
+#    Release 里的 boot-Image-los102-apatch-bbr.img 是"净版"（未打 root 补丁）。
 #    方式 A（推荐，已 root 设备）：用本项目 flash-local.sh，它会自动 APatch 打补丁→dd→回读
-#    方式 B（任意设备）：装 APatch App → "选择并修补一个文件" → 选 boot-Image-los101-apatch-bbr.img
+#    方式 B（任意设备）：装 APatch App → "选择并修补一个文件" → 选 boot-Image-los102-apatch-bbr.img
 #      → 产出 patched_xxx.img 再刷它：
 adb reboot bootloader
-fastboot flash boot_a patched_boot-Image-los101-apatch-bbr.img   # ← 刷打过补丁的！
+fastboot flash boot_a patched_boot-Image-los102-apatch-bbr.img   # ← 刷打过补丁的！
 fastboot reboot
 
 # 2) 装开机脚本（★ WiFi 的命根子，必做）
@@ -86,14 +91,14 @@ adb shell su -c "chmod 755 /data/adb/service.d/99-wlan-mars.sh"
 
 # 3) 刷后核身份 + BBR（防假阳性/刷错槽）
 adb shell 'uname -a; getprop ro.boot.slot_suffix; cat /proc/sys/kernel/random/boot_id; \
-           zcat /proc/config.gz | grep -E "TCP_CONG_BBR|DEFAULT_TCP_CONG"; \
+           zcat /proc/config.gz | grep -E "TCP_CONG_BBR|DEFAULT_TCP_CONG|IP6_NF_NAT|IP6_NF_TARGET_MASQUERADE"; \
            cat /proc/sys/net/ipv4/tcp_congestion_control'
-#    自编内核: "runner@..." + 2026 年日期 + 槽 _a；BBR: =y / "bbr" / bbr
+#    自编内核: "runner@..." + 2026 年日期 + 槽 _a；BBR: =y / "bbr" / bbr；IPv6 NAT: =y / =y
 ```
 
-**los101 = 新默认基线**：进 MIUI ✅ WiFi ✅ 触屏 ✅ 电池 ✅ 相机 ✅ 音频 ✅ **BBR=bbr** ✅ APatch root ✅ 容器 ✅
-md5：`boot-Image-los101-apatch-bbr.img` = `f0c43b9970adee2a63ccf9b3c9d70142`；
-`Image-los101-apatch-bbr` = `b10a6a1c0cf365aef30fcfc90a612593`。
+**los102 = 新默认基线**：进 MIUI ✅ WiFi ✅ 触屏 ✅ 电池 ✅ 相机 ✅ 音频 ✅ **BBR=bbr** ✅ APatch root ✅ 容器 ✅
+md5：`boot-Image-los102-apatch-bbr.img` = `85ab08c30055b37bf38f47bfc900403f`；
+`Image-los102-apatch-bbr` = `117622f86ba636934255ab0433e47fdf`。
 
 ---
 
@@ -174,10 +179,10 @@ fastboot reboot
 
 ## 5. 手机端 dd 刷法（无 fastboot 时，root 可用）
 
-`flash-local.sh` 的等价手动流程（los101）：
+`flash-local.sh` 的等价手动流程（los102）：
 
 ```bash
-adb push boot-Image-los101-apatch-bbr-APatch.img /data/local/tmp/next.img
+adb push boot-Image-los102-apatch-bbr.img /data/local/tmp/next.img
 # 先备份当前 boot_a（强烈建议）
 adb shell su -c 'dd if=/dev/block/by-name/boot_a of=/data/local/tmp/boot_a-backup.img bs=1M'
 adb shell su -c 'dd if=/data/local/tmp/next.img of=/dev/block/by-name/boot_a bs=1M conv=notrunc'
@@ -188,13 +193,13 @@ adb reboot
 
 ---
 
-## 6. 刷后验收（los101 · APatch + BBR）
+## 6. 刷后验收（los102 · APatch + BBR + IPv6 NAT）
 
 ```bash
 adb shell 'cat /proc/asound/cards'        # 期望: 0 [lahainamtpsndca]: lahaina-mtp-snd-card
 adb shell 'su -c dmesg | grep -c DSP1'    # 期望: 开机一段后稳定不增长
 adb shell 'getprop sys.boot_completed'    # 期望: 1（且 boot_id 稳定）
-adb shell 'zcat /proc/config.gz | grep -E "TCP_CONG_BBR|DEFAULT_TCP_CONG|NET_SCH_FQ"'
+adb shell 'zcat /proc/config.gz | grep -E "TCP_CONG_BBR|DEFAULT_TCP_CONG|NET_SCH_FQ|IP6_NF_NAT|IP6_NF_TARGET_MASQUERADE"'
 adb shell 'cat /proc/sys/net/ipv4/tcp_congestion_control'   # 期望: bbr
 adb shell 'su -c id'                      # 期望: uid=0，APatch context u:r:magisk:s0
 tinyplay t.wav -D 0 -d 0                  # 期望: 出声（rc=0）
@@ -205,8 +210,10 @@ tinyplay t.wav -D 0 -d 0                  # 期望: 出声（rc=0）
 
 ## 7. 回退
 
-- **回到 los101 基线（推荐）**：刷 Release 的 `boot-Image-los101-apatch-bbr.img`
-  （md5 `f0c43b9970adee2a63ccf9b3c9d70142`；记得先 APatch 打补丁）。
+- **回到 los102 基线（推荐）**：刷 Release 的 `boot-Image-los102-apatch-bbr.img`
+  （md5 `85ab08c30055b37bf38f47bfc900403f`；记得先 APatch 打补丁）。
+- **回到 los101**：`work/keep-los126-apatch-bbr/boot-Image-los126-apatch-bbr-APatch.img`
+  （旧 APatch，md5 `a43083b5…`）或 `work/backups/boot_a-los101-backup-20261019.img`（md5 `f48477ea…`）。
 - **回到刷机前的 KSU 版**：本地 `work/backups/boot_a-los100-ksu-backup-20261019.img`
   （md5 `a0ae428e60cdcd1054347b6eaa2e78ea`，192MB 完整 boot_a 分区）→ `fastboot flash boot_a`。
 - **回到原厂+APatch**：刷 GOLD 镜像（§2.7，md5 `8fcf3576…`）。

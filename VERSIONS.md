@@ -1766,6 +1766,8 @@ USB 直连排障：容器里 `lsusb` 能见 mars（`2717:ff48`）但 adb 扫不�
 **基线选择**：用 APatch 最后成功版 **los96**（run `38245465726`，commit `ab81bdb`，release `los96-audio-final`），
 不引入 KSU 期改动；只加 BBR 开关。
 
+**范围**：本 tag 是纯 APatch（无 KSU 整合步骤、无 close-range-436）；容器 shim 源码随仓（`patches/nr436-shim*`）。
+
 **先确认 los96 的 BBR 是关的**（从 los96 artifact 的 Image 内嵌 IKCONFIG 提取，非猜测）：
 ```text
 # CONFIG_TCP_CONG_ADVANCED is not set
@@ -1837,7 +1839,74 @@ CONFIG_DEFAULT_TCP_CONG="cubic"
 - 回退：刷前 KSU 版完整 boot 备份 md5 `a0ae428e60cdcd1054347b6eaa2e78ea`（本地
   `work/backups/boot_a-los100-ksu-backup-20261019.img`）；原厂+APatch GOLD `8fcf3576ea35c98da130d16c292d9967`。
 
-> **main 分支说明（2026-10-19）**：main 的 `los.yml` 已同时带 BBR 门控步骤与 `MARS-CLOSE-RANGE-436`
-> （KSU 期通用修复）。Release `los101-apatch-bbr` 的 **exact 构建**是 tag `los101-apatch-bbr`
-> （los96 + BBR，无 close-range）；APatch 下 436 仍被 KernelPatch supercall 占用，close-range 对 APatch
-> 无实际收益（容器 NAT 仍以 `nr436-shim` 为正解）。要与发布逐字节复现请用 tag/分支 `apatch-bbr`。
+---
+
+## ★★★★★★ 2026-10-19 **los102-apatch-bbr：los101 + IPv6 NAT（Droidspaces 7.0 检查项）**
+
+**背景**：用户把 Droidspaces 升到 **7.0**，检查页多出三项：Macvlan、IPv6 NAT、CPU limit。
+按用户要求：**只开 IPv6 NAT**；Macvlan（`--net=m` 才用）和 CPU limit（`CFS_BANDWIDTH`）**明确不开**（黄色 X 可忽略）。
+
+**精确需求**（从 Droidspaces 7.0 APK 的 DEX 字符串提取，非猜）：
+```text
+CONFIG_IP6_NF_NAT=y
+CONFIG_IP6_NF_TARGET_MASQUERADE=y
+```
+依赖已在基线里：`NETFILTER_ADVANCED=y`、`NF_NAT=y`、`IP6_NF_IPTABLES=y`、`NF_DEFRAG_IPV6=y`。
+
+**踩坑（第一次构建失败）**：`mars_factory.config` 在 `# CONFIG_IP6_NF_SECURITY is not set` 之后已有一行
+`# CONFIG_IP6_NF_NAT is not set`；在文件前面插入 `CONFIG_IP6_NF_NAT=y` 会被后者覆盖
+（`.config:1033: warning: override: reassigning to symbol IP6_NF_NAT`），CI 断言报
+`Droidspaces 7 IPv6 NAT: IP6_NF_NAT 不是 y`（run `39177131394`）。修法：直接改**末尾那段**为
+`CONFIG_IP6_NF_NAT=y` + `CONFIG_IP6_NF_TARGET_MASQUERADE=y`。
+
+**CI**：
+- run `39177932470` success；artifact `los-kernel-128`；head `60aa516`。
+- 构建断言（config 步）：
+  ```text
+  CONFIG_IP6_NF_NAT=y
+  CONFIG_IP6_NF_TARGET_MASQUERADE=y
+  ```
+- 产物内嵌 config 实测：BBR 仍为 `TCP_CONG_BBR=y` / `DEFAULT_TCP_CONG="bbr"` / `NET_SCH_FQ=y`；
+  `CONFIG_KSU` 不存在；`strings Image | grep -c KernelSU` = 0。
+
+**产物（Release `los102-apatch-bbr`）**：
+
+| 文件 | md5 | 大小/说明 |
+|---|---|---|
+| `Image-los102-apatch-bbr` | `117622f86ba636934255ab0433e47fdf` | 43,813,376 B |
+| `boot-Image-los102-apatch-bbr.img` | `85ab08c30055b37bf38f47bfc900403f` | 64,172,032 B 净版 boot |
+| `los102-modules.tgz` | `21015154d57b14ea4f9f991f5810611d` | 内核模块包 |
+| `config-last.gz` | 以 Release `MD5SUMS` 为准 | 内嵌 config |
+
+**真机验收（2026-10-19）**：
+- 内核 `5.4.242-qgki-gbb70cde46897` **#27** `Sun Oct 19 00:01:32 UTC 2026`（runner@）。
+- BBR：`/proc/sys/net/ipv4/tcp_congestion_control` = `bbr`。
+- IPv6 NAT：`CONFIG_IP6_NF_NAT=y`、`CONFIG_IP6_NF_TARGET_MASQUERADE=y`；
+  **Droidspaces 7.0 检查页 IPv6 NAT ✅**（用户截图确认），Summary = All required features found。
+- Macvlan ❌ / CPU limit ❌ 保留黄色 X（用户明确不用）。
+- APatch root：`su` → `uid=0`、`context=u:r:magisk:s0`；手机 APatch 已升级 **11282**，
+  用新版 App 重新打补丁后启动 #27。
+- 槽位 `_a`，`boot_completed=1`。
+
+**APatch 版本说明**：
+- **内核编译不依赖 APatch 版本**；APatch 只在 boot 镜像上打补丁。
+- 打补丁用**与手机 APatch App 同版本**的 `kptools` / `kpimg`。APatch 11282 的 payload 已存
+  `work/apatch-payload-11282/`；旧 0.13.3 payload 备份在 `work/apatch-payload-d03-backup/`。
+- 个人 superkey 不入库。
+
+**“设备内部出了问题”弹窗（2026-10-19）**：
+- **不是签名/AVB 问题**。`ro.boot.verifiedbootstate=orange`、`flash.locked=0`、`veritymode=enforcing`。
+- 根因是 MIUI EEA ROM 自身的 fingerprint 不一致（`Build.isBuildConsistent()` 失败）：
+  `ro.build.fingerprint` = `...:13/TKQ1.220829.002/...`，
+  `ro.vendor.build.fingerprint` = `...:13/RKQ1.211001.001/...`，
+  `ro.system.build.fingerprint` = `qti/missi_phone_eea/missi:...`，
+  `ro.product.build.fingerprint` = `Xiaomi/miproduct_star_eea/missi:...`。
+- 与内核/APatch 签名无关；可忽略。要消掉只能改 ROM props（不推荐，影响 OTA/Play Integrity）。
+
+**回退**：los101 boot 完整备份 `work/backups/boot_a-los101-backup-20261019.img`
+（md5 `f48477ea1201cd7534d66255d2677d39`）；KSU 备份 `a0ae428e…`；原厂+APatch GOLD `8fcf3576…`。
+
+> **main 分支说明（2026-10-19）**：main 的 `los.yml` 已同时带 BBR 门控、IPv6 NAT 断言与
+> `MARS-CLOSE-RANGE-436`（KSU 期通用修复）。Release `los102-apatch-bbr` 的 **exact 构建**是 tag
+> `los102-apatch-bbr`（los101 + IPv6 NAT，无 close-range）；APatch 下 436 仍被 KernelPatch supercall 占用，
+> close-range 对 APatch 无实际收益（容器 NAT 仍以 `nr436-shim` 为正解）。
