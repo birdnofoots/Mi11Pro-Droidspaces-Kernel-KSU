@@ -17,6 +17,17 @@
 > **Docker**：los103 已打开 `BRIDGE_NETFILTER`/`IP_SET*`/`NETFILTER_XT_MATCH_ADDRTYPE`/`NF_TABLES` 等，
 > `docker run --rm hello-world` 与 `alpine` bridge（172.17.0.2 → ping 1.1.1.1 0%）实测通过。
 
+> ⚠️ **host 网络模式的容器会重命名手机网卡**（2026-10-21 实测 mars）：
+> ubuntu 容器用 `--net=host` 时，容器里的 `systemd-udevd` 会把宿主的 `wlan0` 重命名成 `wlp1s0`
+> （`/usr/lib/udev/rules.d/80-net-setup-link.rules`），导致 WiFi 框架找不到 `wlan0`、
+> `svc wifi enable` 无效、开机后 WiFi 起不来（时好时坏，取决于容器和 WLAN 驱动的启动先后）。
+> **修法**（在 host 模式容器内执行一次）：
+> ```bash
+> ln -sf /dev/null /etc/udev/rules.d/80-net-setup-link.rules
+> udevadm control --reload-rules
+> ```
+> 之后容器重启也不会再改宿主网卡名。容器需要 host 网络（如 DSH 8080 直连）时务必先做这步。
+
 > **systemd ≥ 260 的镜像在 5.4 内核上起不来**（实测 Kali 2026.3 = systemd 262）：
 > systemd 260 起用 `STATX_ATTR_MOUNT_ROOT`（内核 6.8+）判断挂载点，5.4 没有该属性 ⇒
 > `Failed to mount API filesystems` → `Exiting PID 1` ⇒ 容器启动约 0.3s 后退出。
